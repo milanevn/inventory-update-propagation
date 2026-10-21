@@ -1,18 +1,24 @@
 """Bản giả để test khi chưa có transport.py, db.py, client/net.py. Phụ trách: TV1 + TV2.
 
 - FakeNetwork + FakeTransport: "mạng" trong RAM nối các node, giả lập mất gói,
-  gói trùng, máy chết. Gửi là đồng bộ, không có socket, không có thread.
+  mất trả lời, gói trùng, máy chết. Gửi là đồng bộ, không có socket, không có thread.
+  Hành xử như Transport thật: gửi lại cùng msg_id, bên nhận nhớ reply theo msg_id.
 - FakeLog: UpdateLog trong RAM, áp dụng đúng quy tắc seq như bản thật.
 - FakeNet: ClientNet trả lời đóng sẵn, để làm giao diện khi chưa có máy chủ.
 - FakeClock: đồng hồ chỉnh tay, để test chu kỳ T, heartbeat mà không phải sleep.
+
+Mọi thông điệp đi qua bản giả đều được encode/decode và validate_data, nên gửi
+thiếu trường hay dữ liệu không phải JSON sẽ báo lỗi ngay khi test.
 
 Ví dụ:
     net = FakeNetwork()
     s1, s2 = net.transport("S1"), net.transport("S2")
     s2.serve(lambda msg: make_ack("S2", 0))
-    reply = s1.request("S2", make_message(MsgType.HEARTBEAT, "S1", data={"last_seq": 0}))
+    reply = s1.request("S2", make_heartbeat("S1", 0))
     net.set_down("S2")          # S2 chết: request tới S2 ném NodeUnreachable
     net.drop("S2", 2)           # 2 lần gửi tới S2 tiếp theo bị mất, lần 3 mới tới
+    net.drop_reply("S2")        # S2 xử lý xong nhưng trả lời bị mất; lần gửi lại
+                                # nhận reply cũ, handler không chạy lần hai
 """
 
 import copy
@@ -27,13 +33,30 @@ from common.interfaces import (
     UpdateLog,
     make_nack,
     make_reply,
+    validate_data,
     validate_record,
 )
-from common.protocol import ErrorCode, MsgType, Op, decode, encode, make_message
+from common.protocol import (
+    ErrorCode,
+    MsgType,
+    Op,
+    decode,
+    encode,
+    make_message,
+    new_msg_id,
+)
 
 # ---------------------------------------------------------------------------
 # Mạng giả
 # ---------------------------------------------------------------------------
+
+
+def _wire(message):
+    """Đi qua "dây": kiểm tra data, encode, decode, như khi gửi qua socket thật."""
+    raw = encode(message)
+    decoded = decode(raw)
+    validate_data(decoded)
+    return decoded
 
 
 class FakeNetwork:
@@ -43,8 +66,12 @@ class FakeNetwork:
         self.max_retries = max_retries
         self.sent = []  # (sender, target, message) theo thứ tự, gồm cả lần gửi lại
         self._handlers = {}
+        self._replies = (
+            {}
+        )  # target -> {msg_id: reply}, như bộ nhớ chống trùng của Transport
         self._down = set()
         self._drop = {}
+        self._drop_reply = {}
         self._duplicate = {}
         self._lock = threading.RLock()
 
@@ -52,10 +79,14 @@ class FakeNetwork:
         return FakeTransport(self, node_id)
 
     def set_down(self, node_id, down=True):
-        """Giả lập máy chết (down=True) hoặc sống lại (down=False)."""
+        """Giả lập máy chết (down=True) hoặc sống lại (down=False).
+
+        Máy sống lại mất bộ nhớ chống trùng, giống máy thật khởi động lại.
+        """
         with self._lock:
             if down:
                 self._down.add(node_id)
+                self._replies.pop(node_id, None)
             else:
                 self._down.discard(node_id)
 
@@ -64,14 +95,25 @@ class FakeNetwork:
             return node_id in self._down
 
     def drop(self, target, count=1):
-        """count lần gửi tiếp theo tới target bị mất (bên gửi sẽ gửi lại)."""
+        """count lần gửi tiếp theo tới target bị mất trên đường đi (handler không chạy)."""
         with self._lock:
             self._drop[target] = self._drop.get(target, 0) + count
 
-    def duplicate(self, target, count=1):
-        """count thông điệp tiếp theo tới target được giao hai lần cho handler.
+    def drop_reply(self, target, count=1):
+        """count lần tiếp theo target xử lý xong nhưng trả lời bị mất trên đường về.
 
-        Dùng để kiểm tra handler xử lý trùng an toàn (ví dụ apply_update bỏ qua seq cũ).
+        Bên gửi hết timeout và gửi lại cùng msg_id; target trả lại reply cũ, không
+        gọi handler lần nữa. Đây là trường hợp "S2 đã áp dụng nhưng S1 không biết".
+        """
+        with self._lock:
+            self._drop_reply[target] = self._drop_reply.get(target, 0) + count
+
+    def duplicate(self, target, count=1):
+        """count thông điệp tiếp theo tới target được giao thêm một bản với msg_id mới.
+
+        Giả lập cùng nội dung tới hai lần qua hai thông điệp khác nhau (ví dụ UPDATE
+        rồi SYNC_RESPONSE chứa lại cùng seq). Bộ chống trùng theo msg_id không chặn
+        được, nên handler phải tự xử lý trùng (apply_update bỏ qua seq cũ).
         """
         with self._lock:
             self._duplicate[target] = self._duplicate.get(target, 0) + count
@@ -80,7 +122,8 @@ class FakeNetwork:
         """Các thông điệp đã gửi tới target (lọc theo loại nếu có)."""
         with self._lock:
             return [
-                m for _, t, m in self.sent
+                copy.deepcopy(m)
+                for _, t, m in self.sent
                 if t == target and (msg_type is None or m["type"] == msg_type)
             ]
 
@@ -91,25 +134,37 @@ class FakeNetwork:
     def _unregister(self, node_id):
         with self._lock:
             self._handlers.pop(node_id, None)
+            self._replies.pop(node_id, None)
 
-    def _attempt(self, sender, target, raw):
-        """Một lần gửi. Trả (True, reply_raw) nếu tới nơi, (False, None) nếu mất."""
+    def _attempt(self, sender, target, message):
+        """Một lần gửi. Trả (True, reply) nếu có trả lời, (False, None) nếu mất."""
         with self._lock:
-            self.sent.append((sender, target, decode(raw)))
+            self.sent.append((sender, target, copy.deepcopy(message)))
             handler = self._handlers.get(target)
             if handler is None or target in self._down:
                 return False, None
             if self._drop.get(target, 0) > 0:
                 self._drop[target] -= 1
                 return False, None
-            twice = self._duplicate.get(target, 0) > 0
+            cache = self._replies.setdefault(target, {})
+            reply = cache.get(message["msg_id"])
+            twice = False
+            if reply is None:
+                twice = self._duplicate.get(target, 0) > 0
+                if twice:
+                    self._duplicate[target] -= 1
+        if reply is None:
+            # Gọi handler ngoài khóa để handler được phép gửi tiếp cho máy khác.
+            reply = _wire(handler(copy.deepcopy(message)))
             if twice:
-                self._duplicate[target] -= 1
-        # Gọi handler ngoài khóa để handler được phép gửi tiếp cho máy khác.
-        reply = handler(decode(raw))
-        if twice:
-            handler(decode(raw))
-        return True, encode(reply)
+                handler(dict(copy.deepcopy(message), msg_id=new_msg_id()))
+            with self._lock:
+                self._replies.setdefault(target, {})[message["msg_id"]] = reply
+        with self._lock:
+            if self._drop_reply.get(target, 0) > 0:
+                self._drop_reply[target] -= 1
+                return False, None
+        return True, copy.deepcopy(reply)
 
 
 class FakeTransport(Transport):
@@ -124,11 +179,11 @@ class FakeTransport(Transport):
         self.network._register(self.node_id, handler)
 
     def request(self, target, message):
-        raw = encode(message)
+        message = _wire(message)
         for _ in range(self.network.max_retries):
-            delivered, reply_raw = self.network._attempt(self.node_id, target, raw)
+            delivered, reply = self.network._attempt(self.node_id, target, message)
             if delivered:
-                return decode(reply_raw)
+                return reply
         raise NodeUnreachable(target)
 
     def close(self):
@@ -145,15 +200,15 @@ class FakeLog(UpdateLog):
 
     def __init__(self):
         self._lock = threading.RLock()
-        self._records = {}       # seq -> bản ghi
+        self._records = {}  # seq -> bản ghi
         self._last_seq = 0
         self._first_seq = 1
         self._checkpoint_seq = 0
         self._runtime = {"batch_n": None, "period_t_seconds": None}
         self._progress = {}
         self._processed = {}
-        self._products = {}      # product_code -> dict
-        self._inventory = {}     # product_code -> quantity
+        self._products = {}  # product_code -> dict
+        self._inventory = {}  # product_code -> quantity
         self._stock_in = []
         self._stock_out = []
 
@@ -288,12 +343,11 @@ class FakeLog(UpdateLog):
         with self._lock:
             self._checkpoint_seq = seq
 
-    def truncate_log(self, before_seq):
+    def truncate_log(self, before_seq, targets):
         with self._lock:
-            limit = before_seq
-            if self._progress:
-                limit = min(limit, min(self._progress.values()) + 1)
-            limit = min(limit, self._last_seq + 1)
+            limit = min(before_seq, self._last_seq + 1)
+            for target in targets:
+                limit = min(limit, self._progress.get(target, 0) + 1)
             if limit > self._first_seq:
                 for s in [s for s in self._records if s < limit]:
                     del self._records[s]
@@ -305,33 +359,50 @@ class FakeLog(UpdateLog):
     def export_snapshot(self):
         with self._lock:
             products = [
-                {k: p[k] for k in ("product_code", "product_name", "unit", "created_at", "seq")}
+                {
+                    k: p[k]
+                    for k in (
+                        "product_code",
+                        "product_name",
+                        "unit",
+                        "created_at",
+                        "seq",
+                    )
+                }
                 for _, p in sorted(self._products.items())
             ]
             inventory = [
                 {"product_code": c, "quantity": q, "seq": self._latest_seq(c)}
                 for c, q in sorted(self._inventory.items())
             ]
-            return copy.deepcopy({
-                "last_seq": self._last_seq,
-                "tables": {
-                    "products": products,
-                    "stock_in": self._stock_in,
-                    "stock_out": self._stock_out,
-                    "inventory": inventory,
-                },
-            })
+            return copy.deepcopy(
+                {
+                    "last_seq": self._last_seq,
+                    "tables": {
+                        "products": products,
+                        "stock_in": self._stock_in,
+                        "stock_out": self._stock_out,
+                        "inventory": inventory,
+                    },
+                }
+            )
 
     def _latest_seq(self, code):
         seqs = [self._products[code]["seq"]]
-        seqs += [r["seq"] for r in self._stock_in + self._stock_out if r["product_code"] == code]
+        seqs += [
+            r["seq"]
+            for r in self._stock_in + self._stock_out
+            if r["product_code"] == code
+        ]
         return max(seqs)
 
     def import_snapshot(self, snapshot):
         tables = snapshot["tables"]
         with self._lock:
             self._products = {p["product_code"]: dict(p) for p in tables["products"]}
-            self._inventory = {i["product_code"]: i["quantity"] for i in tables["inventory"]}
+            self._inventory = {
+                i["product_code"]: i["quantity"] for i in tables["inventory"]
+            }
             self._stock_in = [dict(r) for r in tables["stock_in"]]
             self._stock_out = [dict(r) for r in tables["stock_out"]]
             self._records = {}
@@ -350,6 +421,7 @@ class FakeNet(ClientNet):
     responder(target, message) -> reply. Không truyền thì dùng demo_responder,
     trả dữ liệu mẫu cho GET_STOCK, STATUS_REQUEST, CONFIG_SET và báo thành công
     cho thao tác ghi. Đặt down={"S3"} để giả lập máy S3 không trả lời.
+    Thông điệp gửi đi thiếu trường data thì ném ProtocolError ngay, trước khi gửi.
     """
 
     def __init__(self, responder=None, down=None):
@@ -358,15 +430,21 @@ class FakeNet(ClientNet):
         self.sent = []
 
     def request(self, target, message):
+        message = _wire(message)
         self.sent.append((target, copy.deepcopy(message)))
         if target in self.down:
             raise NodeUnreachable(target)
-        return decode(encode(self.responder(target, decode(encode(message)))))
+        return _wire(self.responder(target, message))
 
 
 DEMO_ITEMS = [
     {"product_code": "SP001", "product_name": "Bút bi", "unit": "cây", "quantity": 120},
-    {"product_code": "SP002", "product_name": "Vở 96 trang", "unit": "quyển", "quantity": 45},
+    {
+        "product_code": "SP002",
+        "product_name": "Vở 96 trang",
+        "unit": "quyển",
+        "quantity": 45,
+    },
     {"product_code": "SP003", "product_name": "Thước kẻ", "unit": "cây", "quantity": 0},
 ]
 
@@ -379,27 +457,45 @@ def demo_responder(target, message):
     msg_type, op, data = message["type"], message["op"], message["data"]
 
     if msg_type == MsgType.STATUS_REQUEST:
-        return make_message(MsgType.STATUS_RESPONSE, target, data={
-            "node_id": target,
-            "is_primary": target == "S1",
-            "last_seq": last_seq,
-            "checkpoint_seq": 8,
-            "batch_n": 5,
-            "period_t_seconds": 10,
-            "peers": {n: {"alive": True, "last_seen": "2026-10-22T09:00:00"}
-                      for n in DEMO_LAST_SEQ if n != target},
-            "progress": {"S1": {"S2": 12, "S3": 10}, "S2": {"S4": 10}}.get(target, {}),
-        })
+        return make_message(
+            MsgType.STATUS_RESPONSE,
+            target,
+            data={
+                "node_id": target,
+                "is_primary": target == "S1",
+                "last_seq": last_seq,
+                "checkpoint_seq": 8,
+                "batch_n": 5,
+                "period_t_seconds": 10,
+                "peers": {
+                    n: {"alive": True, "last_seen": "2026-10-22T09:00:00"}
+                    for n in DEMO_LAST_SEQ
+                    if n != target
+                },
+                "progress": {"S1": {"S2": 12, "S3": 10}, "S2": {"S4": 10}}.get(
+                    target, {}
+                ),
+            },
+        )
 
     if msg_type == MsgType.CONFIG_SET:
-        return make_reply(target, True, result={
-            "batch_n": data.get("batch_n") or 5,
-            "period_t_seconds": data.get("period_t_seconds") or 10,
-        }, last_seq=last_seq)
+        return make_reply(
+            target,
+            True,
+            result={
+                "batch_n": data.get("batch_n") or 5,
+                "period_t_seconds": data.get("period_t_seconds") or 10,
+            },
+            last_seq=last_seq,
+        )
 
     if msg_type == MsgType.ADMIN:
-        return make_reply(target, True, result={"message": f"Đã thực hiện {op} trên {target}"},
-                          last_seq=last_seq)
+        return make_reply(
+            target,
+            True,
+            result={"message": f"Đã thực hiện {op} trên {target}"},
+            last_seq=last_seq,
+        )
 
     if msg_type == MsgType.REQUEST and op == Op.GET_STOCK:
         code = data.get("product_code")
@@ -413,8 +509,13 @@ def demo_responder(target, message):
         result = {"seq": seq, "product_code": data.get("product_code")}
         if op in (Op.STOCK_IN, Op.STOCK_OUT):
             prefix = "PN-" if op == Op.STOCK_IN else "PX-"
-            result.update({"voucher_no": f"{prefix}{seq:06d}", "quantity_after": 100,
-                           "replicated_to_s2": True})
+            result.update(
+                {
+                    "voucher_no": f"{prefix}{seq:06d}",
+                    "quantity_after": 100,
+                    "replicated_to_s2": True,
+                }
+            )
         return make_reply(target, True, result=result, last_seq=seq)
 
     return make_nack(target, ErrorCode.UNKNOWN_OP, last_seq)

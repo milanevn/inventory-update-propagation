@@ -10,28 +10,57 @@ import unittest
 from common import config
 from common.fakes import FakeClock, FakeLog, FakeNet, FakeNetwork
 from common.interfaces import (
+    MAX_RECORDS_PER_MESSAGE,
     LogTruncated,
     NodeContext,
     NodeUnreachable,
     SeqGapError,
+    handle_sync_request,
     handle_updates,
     make_ack,
+    make_heartbeat,
+    make_nack,
+    make_reply,
+    make_sync_request,
+    make_update,
+    make_update_batch,
+    validate_data,
     validate_record,
 )
-from common.protocol import ErrorCode, MsgType, Op, make_message, voucher_no
+from common.protocol import (
+    ErrorCode,
+    MsgType,
+    Op,
+    ProtocolError,
+    make_message,
+    voucher_no,
+)
 
 T0 = "2026-10-22T09:00:00"
 
 
 def add_product(seq, code="SP001", name="Bút bi", unit="cây"):
-    return {"seq": seq, "op": Op.ADD_PRODUCT, "created_at": T0,
-            "data": {"product_code": code, "product_name": name, "unit": unit}}
+    return {
+        "seq": seq,
+        "op": Op.ADD_PRODUCT,
+        "created_at": T0,
+        "data": {"product_code": code, "product_name": name, "unit": unit},
+    }
 
 
 def stock(op, seq, quantity, code="SP001"):
-    return {"seq": seq, "op": op, "created_at": T0,
-            "data": {"voucher_no": voucher_no(op, seq), "product_code": code,
-                     "quantity": quantity, "unit_price": None, "note": None}}
+    return {
+        "seq": seq,
+        "op": op,
+        "created_at": T0,
+        "data": {
+            "voucher_no": voucher_no(op, seq),
+            "product_code": code,
+            "quantity": quantity,
+            "unit_price": None,
+            "note": None,
+        },
+    }
 
 
 class UpdateLogContract:
@@ -73,9 +102,17 @@ class UpdateLogContract:
 
     def test_business_effects(self):
         self.apply_basic()
-        self.assertEqual(self.log.stock(), [
-            {"product_code": "SP001", "product_name": "Bút bi", "unit": "cây", "quantity": 6},
-        ])
+        self.assertEqual(
+            self.log.stock(),
+            [
+                {
+                    "product_code": "SP001",
+                    "product_name": "Bút bi",
+                    "unit": "cây",
+                    "quantity": 6,
+                },
+            ],
+        )
         self.assertIsNone(self.log.get_product("SP999"))
         self.assertEqual(self.log.stock("SP999"), [])
 
@@ -109,10 +146,14 @@ class UpdateLogContract:
         self.assertEqual(self.log.get_progress("S2"), 5)
 
     def test_runtime_config_keeps_unset_values(self):
-        self.assertEqual(self.log.get_runtime_config(), {"batch_n": None, "period_t_seconds": None})
+        self.assertEqual(
+            self.log.get_runtime_config(), {"batch_n": None, "period_t_seconds": None}
+        )
         self.log.set_runtime_config(batch_n=3)
         self.log.set_runtime_config(period_t_seconds=2.5)
-        self.assertEqual(self.log.get_runtime_config(), {"batch_n": 3, "period_t_seconds": 2.5})
+        self.assertEqual(
+            self.log.get_runtime_config(), {"batch_n": 3, "period_t_seconds": 2.5}
+        )
         with self.assertRaises(ValueError):
             self.log.set_runtime_config(batch_n=0)
 
@@ -121,18 +162,42 @@ class UpdateLogContract:
         self.log.set_progress("S2", 3)
         self.log.set_progress("S3", 1)
         self.log.set_checkpoint_seq(3)
-        self.assertEqual(self.log.truncate_log(4), 2)
+        self.assertEqual(self.log.truncate_log(4, ["S2", "S3"]), 2)
         self.assertEqual(self.log.checkpoint_seq(), 3)
         self.assertEqual([r["seq"] for r in self.log.read_from(2)], [2, 3])
         with self.assertRaises(LogTruncated) as cm:
             self.log.read_from(1)
         self.assertEqual(cm.exception.first_seq, 2)
 
+    def test_truncate_target_without_progress_keeps_all(self):
+        self.apply_basic()
+        self.log.set_progress("S2", 3)
+        self.assertEqual(self.log.truncate_log(4, ["S2", "S3"]), 1)
+        self.assertEqual(len(self.log.read_from(1)), 3)
+
+    def test_truncate_without_targets_stops_at_last_seq(self):
+        self.apply_basic()
+        self.assertEqual(self.log.truncate_log(100, []), 4)
+        self.assertEqual(self.log.read_from(4), [])
+        self.assertTrue(self.log.apply_update(stock(Op.STOCK_IN, 4, 1)))
+        self.assertEqual([r["seq"] for r in self.log.read_from(4)], [4])
+
+    def test_read_from_beyond_last_seq_is_empty(self):
+        self.apply_basic()
+        self.assertEqual(self.log.read_from(10), [])
+
+    def test_bad_record_rejected_without_change(self):
+        with self.assertRaises(ValueError):
+            self.log.apply_update({"seq": 1, "op": Op.ADD_PRODUCT})
+        self.assertEqual(self.log.last_seq(), 0)
+
     def test_snapshot_roundtrip(self):
         self.apply_basic()
         snap = self.log.export_snapshot()
         self.assertEqual(snap["last_seq"], 3)
-        self.assertEqual(set(snap["tables"]), {"products", "stock_in", "stock_out", "inventory"})
+        self.assertEqual(
+            set(snap["tables"]), {"products", "stock_in", "stock_out", "inventory"}
+        )
         other = self.make_log()
         other.import_snapshot(snap)
         self.assertEqual(other.last_seq(), 3)
@@ -154,11 +219,15 @@ class ValidateRecordTest(unittest.TestCase):
 
     def test_invalid_records(self):
         bad = [
-            {"seq": 1, "op": Op.ADD_PRODUCT, "data": {}},                 # thiếu created_at
+            {"seq": 1, "op": Op.ADD_PRODUCT, "data": {}},  # thiếu created_at
             dict(add_product(1), seq=0),
             dict(add_product(1), op=Op.GET_STOCK),
             stock(Op.STOCK_IN, 1, 0),
             stock(Op.STOCK_IN, 1, True),
+            dict(
+                stock(Op.STOCK_IN, 1, 5),
+                data=dict(stock(Op.STOCK_IN, 1, 5)["data"], unit_price=-1),
+            ),
         ]
         for record in bad:
             with self.subTest(record=record), self.assertRaises(ValueError):
@@ -177,7 +246,7 @@ class FakeTransportTest(unittest.TestCase):
             return make_ack("S2", 7)
 
         self.s2.serve(handler)
-        self.msg = make_message(MsgType.HEARTBEAT, "S1", data={"last_seq": 0})
+        self.msg = make_heartbeat("S1", 0)
 
     def test_deliver_and_reply(self):
         reply = self.s1.request("S2", self.msg)
@@ -206,10 +275,41 @@ class FakeTransportTest(unittest.TestCase):
         with self.assertRaises(NodeUnreachable):
             self.s1.request("S2", self.msg)
 
-    def test_duplicate_delivery(self):
+    def test_lost_reply_resend_gets_cached_reply(self):
+        self.net.drop_reply("S2")
+        reply = self.s1.request("S2", self.msg)
+        self.assertEqual(reply["data"]["last_seq"], 7)
+        self.assertEqual(len(self.net.messages_to("S2")), 2)
+        self.assertEqual(len(self.received), 1)  # handler chỉ chạy một lần
+
+    def test_same_msg_id_twice_runs_handler_once(self):
+        self.s1.request("S2", self.msg)
+        self.s1.request("S2", self.msg)
+        self.assertEqual(len(self.received), 1)
+
+    def test_restart_forgets_seen_msg_ids(self):
+        self.s1.request("S2", self.msg)
+        self.net.set_down("S2")
+        self.net.set_down("S2", False)
+        self.s1.request("S2", self.msg)
+        self.assertEqual(len(self.received), 2)
+
+    def test_duplicate_delivery_uses_new_msg_id(self):
         self.net.duplicate("S2")
         self.s1.request("S2", self.msg)
         self.assertEqual(len(self.received), 2)
+        self.assertNotEqual(self.received[0]["msg_id"], self.received[1]["msg_id"])
+        self.assertEqual(self.received[0]["data"], self.received[1]["data"])
+
+    def test_missing_data_field_rejected_before_sending(self):
+        with self.assertRaises(ProtocolError):
+            self.s1.request("S2", make_message(MsgType.HEARTBEAT, "S1"))
+        self.assertEqual(self.net.sent, [])
+
+    def test_bad_reply_from_handler_rejected(self):
+        self.s2.serve(lambda msg: make_message(MsgType.ACK, "S2"))
+        with self.assertRaises(ProtocolError):
+            self.s1.request("S2", self.msg)
 
     def test_not_serving_or_closed(self):
         with self.assertRaises(NodeUnreachable):
@@ -221,7 +321,69 @@ class FakeTransportTest(unittest.TestCase):
 
     def test_non_json_data_rejected(self):
         with self.assertRaises(TypeError):
-            self.s1.request("S2", make_message(MsgType.HEARTBEAT, "S1", data={"x": object()}))
+            self.s1.request(
+                "S2", make_message(MsgType.HEARTBEAT, "S1", data={"x": object()})
+            )
+
+
+class ValidateDataTest(unittest.TestCase):
+    def test_valid_messages(self):
+        for msg in [
+            make_reply("S1", True, last_seq=0),
+            make_ack("S2", 3),
+            make_nack("S1", ErrorCode.LOG_TRUNCATED, 9, first_seq=5),
+            make_heartbeat("S2", 3),
+            make_sync_request("S3", 4),
+            make_update("S1", add_product(1)),
+            make_update_batch("S1", [add_product(1), stock(Op.STOCK_IN, 2, 5)]),
+            make_message(MsgType.SNAPSHOT_REQUEST, "S4"),
+            make_message(MsgType.STATUS_REQUEST, "CLIENT"),
+            make_message(
+                MsgType.CONFIG_SET,
+                "CLIENT",
+                data={"batch_n": 3, "period_t_seconds": None},
+            ),
+            make_message(MsgType.ADMIN, "CLIENT", op=Op.RECOVER),
+            make_message(
+                MsgType.REQUEST, "CLIENT", op=Op.GET_STOCK, data={"product_code": None}
+            ),
+            make_message(
+                MsgType.REQUEST, "CLIENT", op="LA"
+            ),  # để máy chủ trả UNKNOWN_OP
+        ]:
+            with self.subTest(type=msg["type"]):
+                validate_data(msg)
+
+    def test_invalid_messages(self):
+        update = make_update("S1", add_product(2))
+        for msg in [
+            make_message("LA", "S1"),
+            make_message(MsgType.ACK, "S1"),
+            make_message(
+                MsgType.REQUEST,
+                "CLIENT",
+                op=Op.STOCK_IN,
+                data={"product_code": "SP001"},
+            ),
+            make_message(MsgType.ADMIN, "CLIENT", op=Op.GET_STOCK),
+            dict(update, seq=3),
+            make_message(
+                MsgType.UPDATE_BATCH,
+                "S1",
+                data={"records": [stock(Op.STOCK_IN, 3, 1), stock(Op.STOCK_IN, 2, 1)]},
+            ),
+            make_message(MsgType.UPDATE_BATCH, "S1", data={"records": [{"seq": 1}]}),
+        ]:
+            with self.subTest(msg=msg), self.assertRaises(ProtocolError):
+                validate_data(msg)
+
+    def test_batch_size_limit(self):
+        records = [
+            stock(Op.STOCK_IN, s, 1) for s in range(1, MAX_RECORDS_PER_MESSAGE + 2)
+        ]
+        with self.assertRaises(ValueError):
+            make_update_batch("S1", records)
+        make_update_batch("S1", records[:MAX_RECORDS_PER_MESSAGE])
 
 
 class HandleUpdatesTest(unittest.TestCase):
@@ -229,7 +391,9 @@ class HandleUpdatesTest(unittest.TestCase):
         log = FakeLog()
         reply = handle_updates(log, "S2", [add_product(1), stock(Op.STOCK_IN, 2, 5)])
         self.assertEqual((reply["type"], reply["data"]["last_seq"]), (MsgType.ACK, 2))
-        reply = handle_updates(log, "S2", [stock(Op.STOCK_IN, 2, 5), stock(Op.STOCK_IN, 3, 1)])
+        reply = handle_updates(
+            log, "S2", [stock(Op.STOCK_IN, 2, 5), stock(Op.STOCK_IN, 3, 1)]
+        )
         self.assertEqual(reply["data"]["last_seq"], 3)
         self.assertEqual(log.get_product("SP001")["quantity"], 6)
 
@@ -240,13 +404,68 @@ class HandleUpdatesTest(unittest.TestCase):
         self.assertEqual(reply["data"]["code"], ErrorCode.SEQ_GAP)
         self.assertEqual(reply["data"]["last_seq"], 1)
 
+    def test_business_error_returns_nack_with_failed_seq(self):
+        log = FakeLog()
+        with self.assertLogs("common.interfaces", "ERROR"):
+            reply = handle_updates(
+                log, "S3", [add_product(1), stock(Op.STOCK_OUT, 2, 5)]
+            )
+        self.assertEqual(reply["data"]["code"], ErrorCode.INTERNAL_ERROR)
+        self.assertEqual(reply["data"]["last_seq"], 1)
+        self.assertEqual(reply["data"]["failed_seq"], 2)
+
+
+class HandleSyncRequestTest(unittest.TestCase):
+    def setUp(self):
+        self.log = FakeLog()
+        handle_updates(
+            self.log,
+            "S1",
+            [add_product(1), stock(Op.STOCK_IN, 2, 5), stock(Op.STOCK_IN, 3, 1)],
+        )
+
+    def test_sync_response_with_limit(self):
+        reply = handle_sync_request(self.log, "S1", 2, limit=1)
+        validate_data(reply)
+        self.assertEqual(reply["type"], MsgType.SYNC_RESPONSE)
+        self.assertEqual([r["seq"] for r in reply["data"]["records"]], [2])
+        self.assertEqual(reply["data"]["last_seq"], 3)
+
+    def test_truncated_log_returns_nack_with_first_seq(self):
+        self.log.truncate_log(3, [])
+        reply = handle_sync_request(self.log, "S1", 1)
+        self.assertEqual(reply["type"], MsgType.NACK)
+        self.assertEqual(reply["data"]["code"], ErrorCode.LOG_TRUNCATED)
+        self.assertEqual(reply["data"]["first_seq"], 3)
+
+    def test_sync_over_fake_network_fills_gap(self):
+        net = FakeNetwork()
+        src = net.transport("S1")
+        src.serve(
+            lambda msg: handle_sync_request(self.log, "S1", msg["data"]["from_seq"])
+        )
+        target_log = FakeLog()
+        target_log.apply_update(add_product(1))
+        reply = net.transport("S3").request("S1", make_sync_request("S3", 2))
+        ack = handle_updates(target_log, "S3", reply["data"]["records"])
+        self.assertEqual(ack["data"]["last_seq"], 3)
+        self.assertEqual(target_log.stock(), self.log.stock())
+
 
 class NodeContextTest(unittest.TestCase):
     def setUp(self):
         cfg = config.load()
         self.log = FakeLog()
         self.clock = FakeClock(100.0)
-        self.ctx = NodeContext("S1", cfg, FakeNetwork().transport("S1"), self.log, clock=self.clock)
+        self.ctx = NodeContext(
+            "S1", cfg, FakeNetwork().transport("S1"), self.log, clock=self.clock
+        )
+
+    def test_topology_from_config(self):
+        self.assertIsNone(self.ctx.upstream)
+        self.assertEqual(
+            sorted(self.ctx.downstreams), [("S2", "immediate"), ("S3", "periodic")]
+        )
 
     def test_dispatch_by_type(self):
         self.ctx.on(MsgType.HEARTBEAT, lambda msg: make_ack("S1", 0))
@@ -263,13 +482,25 @@ class NodeContextTest(unittest.TestCase):
             raise RuntimeError("lỗi")
 
         self.ctx.on(MsgType.UPDATE, broken)
-        reply = self.ctx.dispatch(make_message(MsgType.UPDATE, "S2"))
+        with self.assertLogs("common.interfaces", "ERROR"):
+            reply = self.ctx.dispatch(make_message(MsgType.UPDATE, "S2"))
         self.assertEqual(reply["data"]["code"], ErrorCode.INTERNAL_ERROR)
 
     def test_notify_applied_merges_results(self):
         self.ctx.on_applied(lambda record: {"replicated_to_s2": False})
         self.ctx.on_applied(lambda record: None)
-        self.assertEqual(self.ctx.notify_applied(add_product(1)), {"replicated_to_s2": False})
+        self.assertEqual(
+            self.ctx.notify_applied(add_product(1)), {"replicated_to_s2": False}
+        )
+
+    def test_failing_callback_does_not_break_others(self):
+        def broken(record):
+            raise RuntimeError("lỗi")
+
+        self.ctx.on_applied(broken)
+        self.ctx.on_applied(lambda record: {"x": 1})
+        with self.assertLogs("common.interfaces", "ERROR"):
+            self.assertEqual(self.ctx.notify_applied(add_product(1)), {"x": 1})
 
     def test_runtime_config_overrides_config(self):
         self.assertTrue(self.ctx.is_primary)
@@ -287,26 +518,56 @@ class NodeContextTest(unittest.TestCase):
 class FakeNetTest(unittest.TestCase):
     def test_demo_replies(self):
         net = FakeNet()
-        reply = net.request("S3", make_message(MsgType.REQUEST, "CLIENT", op=Op.GET_STOCK,
-                                               data={"product_code": None}))
+        reply = net.request(
+            "S3",
+            make_message(
+                MsgType.REQUEST, "CLIENT", op=Op.GET_STOCK, data={"product_code": None}
+            ),
+        )
         self.assertTrue(reply["data"]["ok"])
         self.assertEqual(len(reply["data"]["result"]["items"]), 3)
 
-        reply = net.request("S2", make_message(MsgType.REQUEST, "CLIENT", op=Op.STOCK_IN,
-                                               data={"product_code": "SP001", "quantity": 1,
-                                                     "unit_price": None, "note": None}))
+        reply = net.request(
+            "S2",
+            make_message(
+                MsgType.REQUEST,
+                "CLIENT",
+                op=Op.STOCK_IN,
+                data={
+                    "product_code": "SP001",
+                    "quantity": 1,
+                    "unit_price": None,
+                    "note": None,
+                },
+            ),
+        )
         self.assertEqual(reply["type"], MsgType.NACK)
         self.assertEqual(reply["data"]["code"], ErrorCode.NOT_PRIMARY)
 
         reply = net.request("S2", make_message(MsgType.STATUS_REQUEST, "CLIENT"))
         self.assertEqual(reply["data"]["node_id"], "S2")
 
+        for msg in [
+            make_message(
+                MsgType.CONFIG_SET,
+                "CLIENT",
+                data={"batch_n": 2, "period_t_seconds": None},
+            ),
+            make_message(MsgType.ADMIN, "CLIENT", op=Op.CORRUPT_DATA),
+        ]:
+            with self.subTest(type=msg["type"]):
+                self.assertTrue(net.request("S1", msg)["data"]["ok"])
+
     def test_down_and_custom_responder(self):
         net = FakeNet(responder=lambda target, msg: make_ack(target, 1), down={"S4"})
+        with self.assertRaises(ProtocolError):
+            net.request("S1", make_message(MsgType.REQUEST, "CLIENT", op=Op.STOCK_IN))
         with self.assertRaises(NodeUnreachable):
             net.request("S4", make_message(MsgType.STATUS_REQUEST, "CLIENT"))
-        self.assertEqual(net.request("S1", make_message(MsgType.STATUS_REQUEST, "CLIENT"))["type"],
-                         MsgType.ACK)
+        self.assertEqual(
+            net.request("S1", make_message(MsgType.STATUS_REQUEST, "CLIENT"))["type"],
+            MsgType.ACK,
+        )
         self.assertEqual(len(net.sent), 2)
 
 
