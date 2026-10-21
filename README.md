@@ -4,22 +4,22 @@ Hệ thống nhân bản dữ liệu kho hàng trên 4 máy chủ, có lan truy�
 
 [![CI](https://github.com/milanevn/inventory-update-propagation/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/milanevn/inventory-update-propagation/actions/workflows/ci.yml) ![Python](https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white) ![SQLite](https://img.shields.io/badge/SQLite-003B57?logo=sqlite&logoColor=white) ![Platform](https://img.shields.io/badge/platform-Windows-0078D6?logo=windows&logoColor=white)
 
-Đồ án môn **Các hệ thống phân tán** · Đề tài 8 · Giảng viên hướng dẫn: _\[Họ tên giảng viên\]_
+Đồ án môn **Các hệ thống phân tán** · Đề tài 8 · Giảng viên hướng dẫn: _[Họ tên giảng viên]_
 
-> **Trạng thái:** đang phát triển. Các lệnh chạy ở mục [Cài đặt và chạy](#c%C3%A0i-%C4%91%E1%BA%B7t-v%C3%A0-ch%E1%BA%A1y) hoạt động đầy đủ khi các module hoàn thành.
+> **Trạng thái:** đang phát triển. Các lệnh chạy ở mục [Cài đặt và chạy](#cài-đặt-và-chạy) hoạt động đầy đủ khi các module hoàn thành.
 
 ## Mục lục
 
-- [Giới thiệu](#gi%E1%BB%9Bi-thi%E1%BB%87u)
-- [Tính năng](#t%C3%ADnh-n%C4%83ng)
-- [Kiến trúc](#ki%E1%BA%BFn-tr%C3%BAc)
-- [Công nghệ](#c%C3%B4ng-ngh%E1%BB%87)
-- [Cài đặt và chạy](#c%C3%A0i-%C4%91%E1%BA%B7t-v%C3%A0-ch%E1%BA%A1y)
-- [Kịch bản demo](#k%E1%BB%8Bch-b%E1%BA%A3n-demo)
-- [Kiểm thử](#ki%E1%BB%83m-th%E1%BB%AD)
-- [Cấu trúc thư mục](#c%E1%BA%A5u-tr%C3%BAc-th%C6%B0-m%E1%BB%A5c)
-- [Tài liệu](#t%C3%A0i-li%E1%BB%87u)
-- [Thành viên](#th%C3%A0nh-vi%C3%AAn)
+- [Giới thiệu](#giới-thiệu)
+- [Tính năng](#tính-năng)
+- [Kiến trúc](#kiến-trúc)
+- [Công nghệ](#công-nghệ)
+- [Cài đặt và chạy](#cài-đặt-và-chạy)
+- [Kịch bản demo](#kịch-bản-demo)
+- [Kiểm thử](#kiểm-thử)
+- [Cấu trúc thư mục](#cấu-trúc-thư-mục)
+- [Tài liệu](#tài-liệu)
+- [Thành viên](#thành-viên)
 
 ---
 
@@ -76,7 +76,7 @@ N và T thay đổi được khi hệ thống đang chạy.
 
 **Yêu cầu:** Windows 10/11, Python 3.10 trở lên (khuyên dùng 3.12, khi cài giữ mục _tcl/tk and IDLE_), Git. Không cần cài thêm thư viện nào.
 
-```
+```powershell
 git clone https://github.com/milanevn/inventory-update-propagation.git
 cd inventory-update-propagation
 python -m scripts.check_env        # kiểm tra máy đã sẵn sàng
@@ -84,14 +84,14 @@ python -m scripts.check_env        # kiểm tra máy đã sẵn sàng
 
 Mọi lệnh đều chạy **từ thư mục gốc repo** bằng `python -m`:
 
-```
+```powershell
 python -m scripts.run_all          # bật cả 4 máy chủ S1–S4
 python -m client.main              # mở ứng dụng client
 ```
 
 Hoặc bật từng máy chủ, mỗi máy một cửa sổ terminal:
 
-```
+```powershell
 python -m server.main --node S1    # tương tự với S2, S3, S4
 ```
 
@@ -119,12 +119,12 @@ Các tình huống lỗi giả lập được trên giao diện:
 
 ## Kiểm thử
 
-```
+```powershell
 python -m compileall -q common server client scripts tests
 python -X warn_default_encoding -W error::EncodingWarning -m unittest discover -s tests -v
 ```
 
-CI (GitHub Actions) chạy các lệnh trên cùng `scripts.check_env` trên Windows với Python 3.12 và 3.10 cho mỗi pull request vào `develop` và `main`. Chạy một phần và cách viết test: [docs/development.md](docs/development.md#ki%E1%BB%83m-th%E1%BB%AD).
+CI (GitHub Actions) chạy các lệnh trên cùng `scripts.check_env` trên Windows với Python 3.12 và 3.10 cho mỗi pull request vào `develop` và `main`. Chạy một phần và cách viết test: [docs/development.md](docs/development.md#kiểm-thử).
 
 ## Cấu trúc thư mục
 
@@ -145,5 +145,17 @@ inventory-update-propagation/
 | [docs/setup.md](docs/setup.md)               | Cài đặt, cấu hình, chạy hệ thống, demo nhiều laptop, lỗi thường gặp         |
 | [docs/development.md](docs/development.md)   | Quy tắc Git và commit, quyền sửa file, quy tắc code, kiểm thử và CI         |
 | [docs/architecture.md](docs/architecture.md) | Thông điệp, quy tắc áp dụng cập nhật, lan truyền, phục hồi, CSDL, thuật ngữ |
+
+## Thành viên
+
+| Thành viên               | MSSV     | Phụ trách                                          |
+| ------------------------ | -------- | -------------------------------------------------- |
+| _[Họ tên]_ (trưởng nhóm) | _[MSSV]_ | Truyền thông tin cậy, lược đồ CSDL, điều phối nhóm |
+| _[Họ tên]_               | _[MSSV]_ | Bản chính và giao tác (S1)                         |
+| _[Họ tên]_               | _[MSSV]_ | Lan truyền tức thời S1 → S2, heartbeat             |
+| _[Họ tên]_               | _[MSSV]_ | Lan truyền trễ S1 → S3, S2 → S4                    |
+| _[Họ tên]_               | _[MSSV]_ | Phục hồi dữ liệu                                   |
+
+---
 
 Đồ án học tập, Học viện Công nghệ Bưu chính Viễn thông cơ sở TP.HCM.
