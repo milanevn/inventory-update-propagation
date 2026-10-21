@@ -13,11 +13,11 @@ Quy tắc Git, quyền sửa file, quy tắc code và kiểm thử. Cài đặt 
 
 ### Nhánh
 
-| Nhánh                  | Dùng để                                         | Ai được gộp vào                                                                 |
-| ---------------------- | ----------------------------------------------- | ------------------------------------------------------------------------------- |
-| `main`                 | Bản chạy ổn định, dùng để demo                  | Chỉ trưởng nhóm, cuối mỗi giai đoạn, gộp từ `develop` qua PR                    |
-| `develop`              | Ghép code của cả nhóm                           | Thành viên: qua PR, CI xanh và trưởng nhóm duyệt. Trưởng nhóm: push hoặc merge thẳng |
-| `<tên>-module<số>`     | Mỗi người code phần của mình, ví dụ `thuy-module1` | Chủ nhánh                                                                    |
+| Nhánh              | Dùng để                                            | Ai được gộp vào                                                                                       |
+| ------------------ | -------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `main`             | Bản chạy ổn định, dùng để demo                     | Chỉ trưởng nhóm, cuối mỗi giai đoạn, gộp từ `develop` qua PR                                          |
+| `develop`          | Ghép code của cả nhóm                              | Thành viên: qua PR, CI xanh và người duyệt được phân công Approve. Trưởng nhóm: push hoặc merge thẳng |
+| `<tên>-module<số>` | Mỗi người code phần của mình, ví dụ `thuy-module1` | Chủ nhánh                                                                                             |
 
 ### Luật PR
 
@@ -26,6 +26,24 @@ Quy tắc Git, quyền sửa file, quy tắc code và kiểm thử. Cài đặt 
 - CI đỏ thì tự sửa trên nhánh mình rồi push lại, không mở PR mới, không nhờ duyệt khi CI còn đỏ.
 - Không force push lên nhánh của người khác hoặc nhánh chung.
 
+### Duyệt PR
+
+Mỗi người duyệt module của một người khác, theo vòng:
+
+| Người mở PR | Module                                   | Người duyệt |
+| ----------- | ---------------------------------------- | ----------- |
+| TV1         | transport, client/net, scripts           | TV3         |
+| TV2         | db, primary, inventory_view              | TV5         |
+| TV3         | replication_sync, heartbeat, status_view | TV4         |
+| TV4         | replication_lazy, lag_view               | TV2         |
+| TV5         | recovery, recovery_view                  | TV1         |
+
+- Mở PR xong thì tự chọn người duyệt của mình ở mục **Reviewers** bên phải.
+- PR chỉ sửa file dùng chung (`common/`, `main.py`, `docs/`): nhờ thành viên nào cũng được.
+- PR sửa `.github/`: chờ trưởng nhóm duyệt.
+- Người duyệt trả lời trong 24 giờ: chạy thử nhánh, rồi Approve hoặc góp ý.
+- Quá 24 giờ chưa ai duyệt thì báo trong nhóm chat.
+
 ### Commit
 
 Mẫu: `<type>(<scope>): <mô tả>`
@@ -33,7 +51,7 @@ Mẫu: `<type>(<scope>): <mô tả>`
 - **type:** `feat`, `fix`, `refactor`, `test`, `docs`, `chore`, `ci`.
 - **scope:** `transport`, `db`, `primary`, `sync`, `heartbeat`, `lazy`, `recovery`, `client`, `common`, `ci`.
 - **mô tả:** tiếng Việt có dấu, bắt đầu bằng động từ (thêm, sửa, gửi, kiểm tra…), viết thường, không chấm cuối, tối đa khoảng 72 ký tự. Tên trong code giữ nguyên tiếng Anh. Cần giải thích thêm thì viết ở phần thân, cũng bằng tiếng Việt.
-- Mỗi commit một việc. Tiêu đề PR theo cùng mẫu. Thay đổi phá tương thích thì thêm `!` sau scope và phải qua mục [Nguồn chuẩn và cách thay đổi](#nguồn-chuẩn-và-cách-thay-đổi).
+- Mỗi commit một việc. Tiêu đề PR theo cùng mẫu. Thay đổi phá tương thích thì thêm `!` sau scope và phải qua mục [Nguồn chuẩn và cách thay đổi](#ngu%E1%BB%93n-chu%E1%BA%A9n-v%C3%A0-c%C3%A1ch-thay-%C4%91%E1%BB%95i).
 
 Ví dụ:
 
@@ -45,17 +63,16 @@ test(lazy): kiểm tra chỉ gửi lô khi đủ N cập nhật
 
 ### GitHub tự chặn những gì
 
-| Cơ chế                         | Tác dụng |
-| ------------------------------ | -------- |
-| Rulesets cho `main` và `develop` | Thành viên không push thẳng được; PR vào `develop` cần CI xanh và trưởng nhóm duyệt; chỉ trưởng nhóm cập nhật được `main`; cấm force push, cấm xóa nhánh. Trưởng nhóm được bỏ qua các quy tắc này |
-| CI (`.github/workflows/ci.yml`) | Mỗi PR hoặc push vào `develop`/`main`: kiểm tra cú pháp, test, check_env trên Windows sạch (Python 3.12, thêm một lượt 3.10) |
-| CODEOWNERS                     | Mọi PR tự động gán trưởng nhóm làm người duyệt |
+| Cơ chế                           | Tác dụng                                                                                                                                                      |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Rulesets cho `main` và `develop` | Thành viên không push thẳng được; PR vào `develop` cần CI xanh và 1 người duyệt Approve; chỉ trưởng nhóm cập nhật được `main`; cấm force push, cấm xóa nhánh. |
+| CI (`.github/workflows/ci.yml`)  | Mỗi PR hoặc push vào `develop`/`main`: kiểm tra cú pháp, test, check_env trên Windows sạch (Python 3.12, thêm một lượt 3.10)                                  |
 
 ### Git hằng ngày
 
 Đầu mỗi buổi, lấy code mới của cả nhóm:
 
-```powershell
+```
 git switch develop
 git pull
 git switch <tên>-module<số>
@@ -64,17 +81,18 @@ git merge develop
 
 Trong lúc code, commit nhỏ, mỗi commit một việc. Dùng `git add <tên file>`, không dùng `git add .`, để không đưa nhầm file đang sửa dở.
 
-```powershell
+```
 git add server/transport.py
 git commit -m "feat(transport): gửi lại thông điệp với cùng msg_id khi hết timeout"
 ```
 
 Khi chức năng đã dùng được:
 
-1. Chạy 3 lệnh ở mục [Kiểm thử](#kiểm-thử), rồi `git push`. Lệnh này chỉ đưa code lên nhánh của bạn, **không tự tạo PR**.
-2. Mở PR trên GitHub: bấm **Compare & pull request** ở khung vàng (không thấy thì tab **Pull requests → New pull request**), chọn base **develop**.
-3. Mô tả 2–3 dòng: làm được gì, chạy thử thế nào, còn thiếu gì.
-4. Chờ CI xanh và trưởng nhóm Approve, rồi bấm **Merge pull request** (Create a merge commit).
+1.  Chạy 3 lệnh ở mục [Kiểm thử](#ki%E1%BB%83m-th%E1%BB%AD), rồi `git push`. Lệnh này chỉ đưa code lên nhánh của bạn, **không tự tạo PR**.
+2.  Mở PR trên GitHub: bấm **Compare & pull request** ở khung vàng (không thấy thì tab **Pull requests → New pull request**), chọn base **develop**.
+3.  Mô tả 2–3 dòng: làm được gì, chạy thử thế nào, còn thiếu gì.
+4.  Ở mục **Reviewers** bên phải, chọn người duyệt của mình theo bảng ở [Duyệt PR](#duyệt-pr).
+5.  Chờ CI xanh và người duyệt Approve, rồi bấm **Merge pull request** (Create a merge commit).
 
 CI đỏ hoặc có góp ý thì sửa trên nhánh mình rồi push lại, không mở PR mới.
 
@@ -90,7 +108,7 @@ CI đỏ hoặc có góp ý thì sửa trên nhánh mình rồi push lại, khô
 
 ```
 inventory-update-propagation/
-├── .github/                    🟡  CODEOWNERS, CI
+├── .github/                    🟡  CI
 ├── .gitattributes, .gitignore  🟡
 ├── README.md, requirements.txt 🟡
 ├── common/                     🟡  protocol, config, schema, interfaces, fakes
@@ -130,28 +148,25 @@ Mỗi thư mục chứa code có một file `__init__.py` rỗng để Python co
 
 ### Thấy lỗi trong file của người khác
 
-1. Không tự sửa. Tạo issue nhãn `bug` trên GitHub, gắn tên chủ file, ghi cách tái hiện.
-2. Chủ file sửa trên nhánh của họ.
-3. Lỗi chặn việc của mình và chủ file đồng ý cho sửa hộ: sửa trên nhánh riêng, chủ file duyệt PR.
+1.  Không tự sửa. Tạo issue nhãn `bug` trên GitHub, gắn tên chủ file, ghi cách tái hiện.
+2.  Chủ file sửa trên nhánh của họ.
+3.  Lỗi chặn việc của mình và chủ file đồng ý cho sửa hộ: sửa trên nhánh riêng, chủ file duyệt PR.
 
 ## Quy tắc code
 
-- **Tên trong code dùng tiếng Anh** (file, hàm, biến, bảng, cột, khóa cấu hình, trường thông điệp): viết thường nối bằng gạch dưới (`stock_out`). Giá trị `type`, `op`, mã lỗi viết HOA (`STOCK_OUT`). Tiếng Việt dùng cho chữ trên giao diện, thông báo lỗi cho người dùng, chú thích trong code, commit message và tiêu đề PR.
-- **Thời gian:** chuỗi ISO 8601 theo giờ máy (`2026-10-11T14:30:00`), tạo bằng `protocol.now_iso()`.
-- **Mở file văn bản luôn ghi `encoding="utf-8"`**, ví dụ `open(path, encoding="utf-8")`. Thiếu encoding thì Windows đọc theo cp1252 và làm hỏng tiếng Việt; CI sẽ báo lỗi.
-- **Import không được tự chạy gì** (mở socket, mở cửa sổ, tạo thread), kể cả `server/main.py`, `client/main.py`, `scripts/*.py`. Code khởi động đặt trong hàm và chỉ gọi dưới `if __name__ == "__main__":`
+**Tên trong code dùng tiếng Anh** (file, hàm, biến, bảng, cột, khóa cấu hình, trường thông điệp): viết thường nối bằng gạch dưới (`stock_out`). Giá trị `type`, `op`, mã lỗi viết HOA (`STOCK_OUT`). Tiếng Việt dùng cho chữ trên giao diện, thông báo lỗi cho người dùng, chú thích trong code, commit message và tiêu đề PR.
 
-  ```python
-  def main():
-      ...  # mở socket, tạo thread, mở cửa sổ ở đây
+**Thời gian:** chuỗi ISO 8601 theo giờ máy (`2026-10-11T14:30:00`), tạo bằng `protocol.now_iso()`.
 
-  if __name__ == "__main__":
-      main()
-  ```
+**Mở file văn bản luôn ghi** `**encoding="utf-8"**`, ví dụ `open(path, encoding="utf-8")`. Thiếu encoding thì Windows đọc theo cp1252 và làm hỏng tiếng Việt; CI sẽ báo lỗi.
 
-- **Không ghi cứng** địa chỉ, cổng, N, T hay timeout trong code; luôn đọc qua `common/config.py`.
-- **Gắn module vào chương trình chính:** mỗi module server có hàm `start(ctx)`, `server/main.py` gọi lần lượt các hàm đó. Mỗi view có hàm `build_tab(notebook, ctx)`, `client/main.py` gọi lần lượt các hàm đó. Làm xong module thì mở PR thêm **đúng 1 dòng** gọi hàm của mình vào `main.py`.
-- **Tách logic khỏi mạng:** phần quyết định (kiểm tra tồn, đến lúc gửi chưa, máy chết chưa) viết thành hàm hoặc class không mở socket, nhận thời gian hiện tại qua tham số `now`, để test bằng `common/fakes.py` mà không phải `sleep`.
+**Import không được tự chạy gì** (mở socket, mở cửa sổ, tạo thread), kể cả `server/main.py`, `client/main.py`, `scripts/*.py`. Code khởi động đặt trong hàm và chỉ gọi dưới `if __name__ == "__main__":`
+
+**Không ghi cứng** địa chỉ, cổng, N, T hay timeout trong code; luôn đọc qua `common/config.py`.
+
+**Gắn module vào chương trình chính:** mỗi module server có hàm `start(ctx)`, `server/main.py` gọi lần lượt các hàm đó. Mỗi view có hàm `build_tab(notebook, ctx)`, `client/main.py` gọi lần lượt các hàm đó. Làm xong module thì mở PR thêm **đúng 1 dòng** gọi hàm của mình vào `main.py`.
+
+**Tách logic khỏi mạng:** phần quyết định (kiểm tra tồn, đến lúc gửi chưa, máy chết chưa) viết thành hàm hoặc class không mở socket, nhận thời gian hiện tại qua tham số `now`, để test bằng `common/fakes.py` mà không phải `sleep`.
 
 ## Kiểm thử
 
@@ -159,20 +174,20 @@ Mỗi thư mục chứa code có một file `__init__.py` rỗng để Python co
 
 Chạy trên máy mình ngay sau khi clone và trước mỗi lần mở PR. Máy mình đạt cả 3 thì CI cũng xanh.
 
-| Lệnh | Kiểm tra gì |
-| --- | --- |
-| `python -m compileall -q common server client scripts tests` | **Cú pháp** mọi file `.py`. Không in gì là đạt |
-| `python -X warn_default_encoding -W error::EncodingWarning -m unittest discover -s tests -v` | **Toàn bộ test tự động** trong `tests/test_*.py`; có `open()` thiếu `encoding="utf-8"` thì báo lỗi |
-| `python -m scripts.check_env` | **Môi trường máy:** phiên bản Python, đứng ở thư mục gốc repo, không nằm trong OneDrive/Dropbox, có Tkinter, có SQLite, ghi được thư mục data, file cấu hình hợp lệ, cổng 5001–5004 còn trống |
+| Lệnh                                                                                         | Kiểm tra gì                                                                                                                                                                                   |
+| -------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `python -m compileall -q common server client scripts tests`                                 | **Cú pháp** mọi file `.py`. Không in gì là đạt                                                                                                                                                |
+| `python -X warn_default_encoding -W error::EncodingWarning -m unittest discover -s tests -v` | **Toàn bộ test tự động** trong `tests/test_*.py`; có `open()` thiếu `encoding="utf-8"` thì báo lỗi                                                                                            |
+| `python -m scripts.check_env`                                                                | **Môi trường máy:** phiên bản Python, đứng ở thư mục gốc repo, không nằm trong OneDrive/Dropbox, có Tkinter, có SQLite, ghi được thư mục data, file cấu hình hợp lệ, cổng 5001–5004 còn trống |
 
 ### Chạy một phần
 
-| Lệnh | Dùng khi |
-| --- | --- |
-| `python -m unittest tests.test_schema -v` | Chạy một file test |
-| `python -m unittest tests.test_schema.NodeStateTest -v` | Chạy một nhóm test |
-| `python -m unittest tests.test_schema.NodeStateTest.test_only_one_row_allowed -v` | Chạy đúng một test |
-| `py -3.10 -m unittest discover -s tests -v` | Thử trên Python 3.10 (máy phải có cài 3.10) |
+| Lệnh                                                                              | Dùng khi                                    |
+| --------------------------------------------------------------------------------- | ------------------------------------------- |
+| `python -m unittest tests.test_schema -v`                                         | Chạy một file test                          |
+| `python -m unittest tests.test_schema.NodeStateTest -v`                           | Chạy một nhóm test                          |
+| `python -m unittest tests.test_schema.NodeStateTest.test_only_one_row_allowed -v` | Chạy đúng một test                          |
+| `py -3.10 -m unittest discover -s tests -v`                                       | Thử trên Python 3.10 (máy phải có cài 3.10) |
 
 ### Viết test
 
@@ -187,3 +202,11 @@ Chạy trên máy mình ngay sau khi clone và trước mỗi lần mở PR. Má
   - **CI / test** (Python 3.12, chạy cả 3 lệnh): bắt buộc xanh mới merge được.
   - **CI / test-py310** (Python 3.10, chạy test): không chặn merge, nhưng đỏ thì phải sửa.
 - Đỏ thì bấm dấu ✗ xem log. Push thêm commit thì lần chạy cũ tự hủy ("Cancelled"). Chạy quá 10 phút thì CI tự dừng và báo đỏ.
+
+```python
+def main():
+    ...  # mở socket, tạo thread, mở cửa sổ ở đây
+
+if __name__ == "__main__":
+    main()
+```
