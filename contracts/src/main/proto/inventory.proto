@@ -1,0 +1,114 @@
+syntax = "proto3";
+package inventory.v1;
+
+option java_package = "edu.inventory.contracts.v1";
+option java_multiple_files = true;
+
+// Wire contract v1. Business operations, replication, and node management
+// are intentionally separate. Internal RPCs require node authentication.
+service InventoryService {
+  rpc ExecuteCommand (CommandRequest) returns (CommandReply);
+  rpc GetInventory (InventoryQuery) returns (InventoryReply);
+}
+service ReplicationService {
+  rpc ApplyEvents (EventBatch) returns (ApplyReply);
+  rpc FetchEvents (FetchRequest) returns (FetchReply);
+}
+service NodeService {
+  rpc GetStatus (NodeStatusRequest) returns (NodeStatusReply);
+  rpc UpdatePolicy (PolicyUpdateRequest) returns (PolicyUpdateReply);
+}
+
+enum OperationType {
+  OPERATION_UNSPECIFIED = 0;
+  CREATE_PRODUCT = 1;
+  STOCK_IN = 2;
+  STOCK_OUT = 3;
+}
+message CommandRequest {
+  string request_id = 1; // UUID, stable across client retries
+  OperationType operation = 2;
+  string product_code = 3;
+  string product_name = 4;
+  string unit = 5;
+  string voucher_no = 6;
+  int64 quantity = 7;
+}
+message CommandReply {
+  bool committed = 1;
+  string event_id = 2;
+  int64 epoch = 3;
+  int64 seq = 4;
+  string message = 5;
+}
+message InventoryQuery {
+  string product_code = 1;
+}
+message InventoryReply {
+  string product_code = 1;
+  int64 quantity = 2;
+  string node_id = 3;
+  int64 epoch = 4;
+  int64 last_applied_seq = 5;
+}
+message ReplicationEvent {
+  string event_id = 1;
+  int64 epoch = 2;
+  int64 seq = 3;
+  OperationType operation = 4;
+  string product_code = 5;
+  string product_name = 6;
+  string unit = 7;
+  string voucher_no = 8;
+  int64 quantity = 9;
+  string event_hash = 10; // optional validation of canonicalized event fields
+}
+message EventBatch {
+  string source_node_id = 1;
+  string destination_node_id = 2;
+  repeated ReplicationEvent events = 3; // contiguous prefix, ascending seq
+}
+enum ApplyCode {
+  APPLY_CODE_UNSPECIFIED = 0;
+  APPLIED = 1;
+  DUPLICATE = 2;
+  GAP_DETECTED = 3;
+  STALE_EPOCH = 4;
+  CONFLICT = 5;
+}
+message ApplyReply {
+  ApplyCode result = 1;
+  int64 epoch = 2;
+  int64 last_applied_seq = 3;
+  string message = 4;
+}
+message FetchRequest {
+  string requesting_node_id = 1;
+  int64 epoch = 2;
+  int64 after_seq = 3;
+  int32 limit = 4; // 1..500
+}
+message FetchReply {
+  repeated ReplicationEvent events = 1;
+  bool snapshot_required = 2;
+  int64 high_watermark_seq = 3;
+}
+message NodeStatusRequest {}
+message NodeStatusReply {
+  string node_id = 1;
+  string role = 2;
+  int64 epoch = 3;
+  int64 last_issued_seq = 4;
+  int64 last_applied_seq = 5;
+  string status = 6;
+}
+message PolicyUpdateRequest {
+  string route_id = 1; // S1_TO_S3 or S2_TO_S4
+  int32 new_value = 2; // seconds or event count
+  string admin_request_id = 3;
+}
+message PolicyUpdateReply {
+  bool accepted = 1;
+  int64 configuration_version = 2;
+  string message = 3;
+}

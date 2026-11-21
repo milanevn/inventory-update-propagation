@@ -1,0 +1,15 @@
+**/target/
+*.class
+.idea/
+*.iml
+.vscode/
+.DS_Store
+.env
+.env.*
+!.env.example
+logs/
+*.log
+*.pid
+*.key
+*.pem
+snapshots/

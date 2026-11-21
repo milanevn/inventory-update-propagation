@@ -1,0 +1,22 @@
+spring:
+  application:
+    name: inventory-node
+  main:
+    web-application-type: none
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5541}/${DB_NAME:inventory}
+    username: ${DB_USER:inventory}
+    password: ${DB_PASSWORD:local_only_change_me}
+  flyway:
+    enabled: true
+node:
+  id: ${NODE_ID:S1}
+  role: ${NODE_ROLE:PRIMARY}
+  grpc-port: ${GRPC_PORT:9101}
+# TODO (TV2/TV3): Node peer endpoints and replication policy wiring.
+cluster:
+  peers:
+    s1: ${PEER_S1:localhost:9101}
+    s2: ${PEER_S2:localhost:9102}
+    s3: ${PEER_S3:localhost:9103}
+    s4: ${PEER_S4:localhost:9104}
