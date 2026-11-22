@@ -99,7 +99,7 @@ S2 chuyển tiếp nguyên vẹn `event_id` và `(epoch, seq)` gốc. Mọi node
 - **Bảng nghiệp vụ:** `products`, `stock_in`, `stock_out`, `inventory`.
 - **Bảng kỹ thuật:** `node_state`, `operation_log` (`UNIQUE(epoch, seq)`), `outbox`, `replication_progress`, `processed_requests`, `replication_policy` (mặc định: trễ 5 giây, lô 3 sự kiện), `snapshot_metadata`.
 
-Hiện mới có `node_state` được code đọc (qua `GetStatus`). Các bảng còn lại đã được tạo nhưng chưa có code ghi. `snapshot_metadata` không được sử dụng, vì phục hồi dựa trên replay operation log. Operation log được giữ vĩnh viễn.
+Hiện mới có `node_state` được code đọc (qua `GetStatus`). Các bảng còn lại đã được tạo nhưng chưa có code ghi. `snapshot_metadata` không được sử dụng, vì phục hồi dựa trên replay operation log, và sẽ bị xóa trong migration V2. Operation log được giữ vĩnh viễn.
 
 Migration đã phát hành không được sửa; mọi thay đổi schema là một migration mới.
 
@@ -114,7 +114,7 @@ Migration đã phát hành không được sửa; mọi thay đổi schema là m
 | `InventoryService` | `ExecuteCommand`, `GetInventory` | Chưa triển khai (trả `UNIMPLEMENTED`) |
 | `ReplicationService` | `ApplyEvents`, `FetchEvents` (limit 1..500) | Chưa triển khai (trả `UNIMPLEMENTED`) |
 
-Trường `ReplicationEvent.event_hash` được dành sẵn; chưa được gán hay kiểm tra, và thuật toán băm chưa được định nghĩa.
+Trường `ReplicationEvent.event_hash` và `FetchReply.snapshot_required` không được sử dụng và sẽ chuyển thành `reserved` trong hợp đồng V2. Sự kiện trùng được đối chiếu bằng cách so sánh trực tiếp các trường của sự kiện.
 
 **Mã lỗi:**
 
@@ -137,20 +137,23 @@ Trường `ReplicationEvent.event_hash` được dành sẵn; chưa được gá
 - **Idempotency phía client:** mỗi lệnh gửi kèm `request_id`. Retry với cùng `request_id` nhận lại kết quả đã lưu. Replica từ chối thao tác ghi.
 - **Giao nhận:**
   - at-least-once kết hợp apply idempotent; không có exactly-once;
-  - khi timeout hoặc `UNAVAILABLE`, sự kiện không được đánh dấu ACK mà được retry với exponential backoff có jitter;
+  - worker gửi được đánh thức bằng tín hiệu trong JVM sau mỗi commit, kèm polling dự phòng mỗi 500 ms;
+  - mỗi lần gọi `ApplyEvents` gửi tối đa 100 sự kiện liên tục;
+  - **ACK cộng dồn:** `last_applied_seq` trong `ApplyReply` xác nhận mọi sự kiện có `seq` nhỏ hơn hoặc bằng giá trị đó. `replication_progress.last_acked_seq` là nguồn sự thật; các dòng outbox tương ứng được đánh dấu `ACKED` trong cùng transaction;
+  - khi timeout hoặc `UNAVAILABLE`, sự kiện không được đánh dấu ACK mà được retry với exponential backoff: bắt đầu 500 ms, nhân đôi mỗi lần, tối đa 30 giây, jitter ±20%;
   - trạng thái retry được lưu trong cơ sở dữ liệu.
 
 | Chính sách | Áp dụng cho | Quy tắc |
 |---|---|---|
 | Ngay lập tức | S2 | Đủ điều kiện gửi ngay khi commit; gửi theo lô nhỏ, `seq` liên tục. |
 | Trễ n giây | S3 | Gửi khi `now >= eligible_at`; n là độ trễ tối thiểu. Thay đổi n chỉ áp dụng cho sự kiện mới. |
-| Theo lô n | S4 | Mỗi lô gồm đúng n sự kiện liên tục chưa được ACK; không có cơ chế xả lô theo thời gian. Lô lỗi giữ nguyên thành viên khi retry; giá trị n mới áp dụng từ lô kế tiếp. |
+| Theo lô n | S4 | Mỗi lô gồm đúng n sự kiện nghiệp vụ liên tục chưa được ACK, bắt đầu ngay sau lô trước và kết thúc tại sự kiện nghiệp vụ thứ n; sự kiện hệ thống nằm trong khoảng đó đi cùng lô và không tính vào n. Không có cơ chế xả lô theo thời gian; S4 bắt kịp cũng chỉ bằng lô đủ n. Lô lỗi giữ nguyên thành viên khi retry; giá trị n mới áp dụng từ lô kế tiếp. |
 
 **Nguồn gửi của từng replica:**
-- Mỗi replica giữ nguyên chính sách nhận của mình.
-- S2 và S3 nhận từ primary.
-- S4 nhận từ S2 khi S2 đang là replica hoạt động; ngược lại, S4 nhận từ primary.
-- Node từng là primary khi quay lại sẽ nhận theo chính sách "ngay lập tức".
+- Mỗi replica giữ nguyên chính sách nhận của mình. Node từng là primary khi quay lại nhận theo chính sách "ngay lập tức".
+- S2, S3 và primary cũ nhận từ primary.
+- Nguồn của S4 được xác định khi promote, ghi trong sự kiện `EPOCH_START` và giữ nguyên trong suốt epoch: là S2 nếu lúc promote S2 còn hoạt động (là replica, hoặc chính là primary mới); ngược lại là primary mới. Ở epoch 1, nguồn của S4 là S2.
+- Nếu nguồn của S4 sập giữa một epoch, S4 tạm dừng nhận cho đến khi nguồn hoạt động trở lại hoặc đến lần promote tiếp theo; nguồn không tự thay đổi.
 
 | Tình huống | Tuyến lan truyền |
 |---|---|
@@ -175,6 +178,36 @@ Node trả lỗi nhanh khi cơ sở dữ liệu không khả dụng (`DB_CONNECT
 - `event_id`, `request_id`
 - `retry_count`
 
+### Hợp đồng V2 (đã chốt, chưa triển khai)
+
+Hợp đồng và schema hiện tại là V1. Các thay đổi dưới đây được triển khai cùng lúc: sửa `inventory.proto` tại chỗ, giữ package `inventory.v1` vì chưa có client nào dùng bản cũ, và thêm migration `V2__*.sql` (không sửa V1). Trường bị bỏ được đánh dấu `reserved`.
+
+| Hợp đồng gRPC | Thay đổi |
+|---|---|
+| `ReplicationEvent` | Thêm `request_id`. Thêm loại sự kiện hệ thống `POLICY_CHANGE`, `EPOCH_START` kèm dữ liệu tương ứng. `event_hash` chuyển thành `reserved` |
+| `CommandRequest`, `CommandReply` | Primary sinh `voucher_no` theo dạng `IN-<epoch>-<seq>` hoặc `OUT-<epoch>-<seq>`. `CommandRequest.voucher_no` chuyển thành `reserved`; `CommandReply` trả thêm `voucher_no` |
+| `PolicyUpdateRequest` | Bỏ `route_id`; thay bằng loại chính sách (`DELAY_SECONDS`, `BATCH_SIZE`) và giá trị mới |
+| `FetchReply` | `snapshot_required` chuyển thành `reserved` |
+| `NodeService.Promote` (mới) | Request: `admin_request_id`, `expected_epoch`. Reply: `accepted`, `new_epoch`, `start_seq`, nguồn của S4, `message`. Trả `FAILED_PRECONDITION` nếu node đã là primary hoặc epoch khác `expected_epoch` |
+| `InventoryService.ListInventory` (mới) | Trả mọi sản phẩm và tồn kho, kèm `node_id`, `epoch`, `last_applied_seq` |
+
+| Schema | Thay đổi |
+|---|---|
+| `node_state` | Thêm `role`; `NODE_ROLE` chỉ là giá trị khởi tạo |
+| `operation_log` | Thêm `request_id` (`NULL` với sự kiện hệ thống) và `schema_version` (bắt đầu từ 1); chấp nhận loại sự kiện hệ thống |
+| `epoch_history` (mới) | `epoch`, `start_seq`, `node_id`, nguồn của S4; dựng từ các sự kiện `EPOCH_START` |
+| `processed_requests` | `event_id` cho phép `NULL` để lưu kết quả của lệnh bị từ chối |
+| `outbox` | Lưu độ trễ đã áp dụng cho từng sự kiện của tuyến trễ |
+| Lô S4 (mới) | Lưu thành viên lô đang gửi: `first_seq`, `last_seq`, trạng thái |
+| `replication_policy` | Khóa theo loại chính sách thay vì tên tuyến |
+| `snapshot_metadata` | Xóa |
+
+**Sự kiện hệ thống.** `UpdatePolicy` tạo sự kiện `POLICY_CHANGE`; `Promote` tạo sự kiện `EPOCH_START` tại `seq = start_seq`. Cả hai nằm trong operation log, dùng chung chuỗi `seq` và được nhân bản như sự kiện nghiệp vụ; nhờ vậy mọi node có cùng cấu hình chính sách và cùng `epoch_history`. Sự kiện hệ thống không tính vào n của lô S4.
+
+**Lệnh bị từ chối** (ví dụ không đủ tồn kho) không tạo sự kiện; kết quả chỉ được lưu ở primary. Sau khi promote, client retry lệnh đó sẽ được xét lại từ đầu trên primary mới.
+
+`ReplicationTransport.DeliveryReceipt` trong `common-domain` được thay bằng mã `ApplyCode` kèm `last_applied_seq`.
+
 ## 4. Sự cố và phục hồi
 
 ### Bảng sự cố
@@ -183,7 +216,7 @@ Node trả lỗi nhanh khi cơ sở dữ liệu không khả dụng (`DB_CONNECT
 |---|---|
 | Timeout hoặc mất ACK | Bên nhận có thể đã commit; retry với cùng `event_id`. |
 | S3 hoặc S4 sập | Hệ thống hoạt động bình thường. Sự kiện cho node đó được giữ trong outbox; node bắt kịp từ `last_applied_seq` khi hoạt động trở lại. |
-| S2 sập | Primary vẫn nhận ghi; S3 vẫn được cập nhật. S4 tạm dừng nhận cho đến khi S2 hoạt động trở lại, hoặc cho đến khi primary trực tiếp trở thành nguồn của S4. |
+| S2 sập | Primary vẫn nhận ghi; S3 vẫn được cập nhật. S4 tạm dừng nhận cho đến khi S2 hoạt động trở lại; nguồn của S4 chỉ thay đổi khi promote (mục 3). |
 | Replica bị crash rồi khởi động lại | Tiếp tục từ tiến độ đã lưu bền; lấy bù các sự kiện còn thiếu. |
 | Dữ liệu replica bị tổn hại | Phục hồi bằng replay (xem bên dưới). |
 | Primary bị crash, dữ liệu còn nguyên, chưa promote | Khởi động lại; outbox tự tiếp tục. |
@@ -193,13 +226,13 @@ Node trả lỗi nhanh khi cơ sở dữ liệu không khả dụng (`DB_CONNECT
 
 ### Thay thế primary (promote thủ công)
 
-Người vận hành chạy lệnh `promote` sau khi xác nhận primary đã sập. Lệnh thực hiện các bước:
+Người vận hành chạy lệnh `promote` của CLI sau khi xác nhận primary đã sập. CLI thực hiện bước 1–2 và 6; node ứng viên thực hiện bước 3–5 khi nhận `NodeService.Promote`:
 
 1. **Kiểm tra an toàn:** nếu primary hiện tại vẫn trả lời `GetStatus` thì từ chối promote.
 2. **Chọn ứng viên:** node còn hoạt động có `(epoch, last_applied_seq)` cao nhất và lịch sử liên tục, không có gap. Nếu bằng nhau, ưu tiên S2, rồi S3, rồi S4.
-3. **Fencing bằng epoch:** ứng viên tăng `epoch` thêm 1 và ghi vào bảng `epoch_history(epoch, start_seq, node_id)`, với `start_seq` là `seq` đầu tiên của epoch mới. Mọi RPC ghi và RPC replication đều kiểm tra epoch; yêu cầu thuộc epoch cũ bị từ chối (`STALE_EPOCH`).
+3. **Fencing bằng epoch:** ứng viên tăng `epoch` thêm 1 và ghi sự kiện `EPOCH_START` (epoch, `start_seq`, node_id, nguồn của S4) tại `seq = start_seq`, là `seq` đầu tiên của epoch mới. Mọi node dựng bảng `epoch_history` từ sự kiện này. Mọi RPC ghi và RPC replication đều kiểm tra epoch; yêu cầu thuộc epoch cũ bị từ chối (`STALE_EPOCH`).
 4. **Chuyển vai trò:** ứng viên chuyển `node_state.role` sang `PRIMARY`, rồi bắt đầu nhận ghi với `seq` tiếp nối.
-5. **Cấu hình lại tuyến lan truyền** theo bảng ở mục 3. Các replica còn lại bắt kịp từ primary mới qua `FetchEvents`.
+5. **Áp dụng tuyến lan truyền của epoch mới** theo quy tắc ở mục 3. Các replica còn lại bắt kịp từ primary mới qua `FetchEvents`.
 6. **Báo cáo:** in ra primary mới, epoch mới, `start_seq`, và `seq` cao nhất mà mỗi node đã có.
 
 Client tìm primary bằng cách gọi `GetStatus` ở các node và chọn node có `role = PRIMARY` với epoch cao nhất.
@@ -210,6 +243,8 @@ Client tìm primary bằng cách gọi `GetStatus` ở các node và chọn node
 
 ### Primary cũ hoạt động trở lại
 
+Primary đang chạy mà nhận `STALE_EPOCH` từ một peer, hoặc thấy epoch cao hơn qua `GetStatus`, lập tức chuyển sang `REPLICA`, ngừng nhận ghi và thực hiện từ bước 2. Trường hợp này xảy ra khi primary chỉ bị mất kết nối mạng trong lúc promote.
+
 1. Khi khởi động, node hỏi `GetStatus` các peer. Thấy epoch cao hơn epoch của mình, node chuyển sang `REPLICA` và không nhận ghi.
 2. Các sự kiện của node có `seq ≥ start_seq` của epoch mới là phần **chưa kịp nhân bản trước khi sập**. Những sự kiện này bị loại bỏ, được ghi log và in ra như **danh sách cập nhật đã mất**.
 3. Node xóa dữ liệu và replay lại từ primary mới, rồi nhận cập nhật theo chính sách "ngay lập tức".
@@ -219,7 +254,7 @@ Client tìm primary bằng cách gọi `GetStatus` ở các node và chọn node
 | Tình huống | Phát hiện | Phục hồi |
 |---|---|---|
 | Mất cơ sở dữ liệu của replica | Node khởi động với `last_applied_seq = 0` hoặc không khởi động được | Tạo cơ sở dữ liệu mới, replay toàn bộ operation log từ node nguồn |
-| Dữ liệu replica bị sửa sai | Kiểm tra bất biến theo yêu cầu: tồn kho của mỗi sản phẩm = tổng nhập − tổng xuất, và không âm | Cách ly node, xóa dữ liệu, replay toàn bộ operation log, kiểm tra lại bất biến |
+| Dữ liệu replica bị sửa sai | Kiểm tra bất biến khi node khởi động và định kỳ mỗi 30 giây: tồn kho của mỗi sản phẩm = tổng nhập − tổng xuất, và không âm | Cách ly node, xóa dữ liệu, replay toàn bộ operation log, kiểm tra lại bất biến |
 | Crash hoặc mất mạng | Phát hiện thiếu `seq` | Lấy bù từ `last_applied_seq` qua `FetchEvents` |
 
 Phục hồi không dùng snapshot: operation log được giữ vĩnh viễn trên mọi node. Khôi phục S4 ngoài chính sách lô là thao tác quản trị tường minh, không phải xả ngầm phần sự kiện còn lại.
@@ -245,6 +280,9 @@ Bất kỳ bước kiểm tra nào thất bại đều đưa node về `QUARANTI
 | 7 | Xác thực RPC nội bộ bằng token dùng chung trong metadata gRPC (`authorization: Bearer <token>`), cấu hình qua biến môi trường `CLUSTER_TOKEN` và kiểm tra bằng `ServerInterceptor`. Áp dụng cho `ReplicationService` và các RPC quản trị của `NodeService` (`UpdatePolicy`, và `Promote` khi được bổ sung vào hợp đồng). `InventoryService` và `GetStatus` không yêu cầu token. Không dùng mTLS. | Không thay đổi `.proto`. Thiếu hoặc sai token trả `UNAUTHENTICATED`. Token truyền plaintext, nên hệ thống chỉ được triển khai trong LAN tin cậy. |
 | 8 | JVM của node do script khởi động dùng `-XX:TieredStopAtLevel=1 -XX:+UseSerialGC -Xms64m -Xmx256m`. Test và CI giữ cấu hình JVM mặc định. | Thời gian khởi động cụm giảm khoảng một nửa. Hiệu năng đỉnh thấp hơn, không ảnh hưởng ở quy mô đồ án. |
 | 9 | Client duy nhất là CLI. Không làm client JavaFX, TLS cho gRPC hay đóng gói node bằng Docker; Docker chỉ dùng để chạy PostgreSQL và là tùy chọn. | Nguồn lực tập trung cho các kịch bản nghiệm thu mức Bắt buộc (xem [kiem-thu.md](kiem-thu.md#3-kịch-bản-nghiệm-thu)). |
+| 10 | Tuyến lan truyền được xác định khi promote, ghi trong sự kiện `EPOCH_START` và giữ nguyên trong suốt epoch. Primary nhận `STALE_EPOCH` hoặc thấy epoch cao hơn thì tự chuyển thành replica. | Mọi node biết cùng một tuyến; tuyến không đổi qua lại khi node sập rồi quay lại. Nếu nguồn của S4 sập giữa epoch, S4 dừng nhận đến khi nguồn quay lại hoặc có lần promote tiếp theo. |
+| 11 | Thay đổi chính sách và bắt đầu epoch là sự kiện hệ thống trong operation log, dùng chung chuỗi `seq` với sự kiện nghiệp vụ. Sự kiện hệ thống không tính vào n của lô S4. | Một cơ chế nhân bản duy nhất cho cả dữ liệu và cấu hình. Logic chia lô S4 phải bỏ qua sự kiện hệ thống khi đếm. |
+| 12 | ACK cộng dồn theo `last_applied_seq`; `replication_progress` là nguồn sự thật về tiến độ của từng peer. | Mất một ACK không gây gửi lại kéo dài, vì ACK sau bao phủ ACK trước. Outbox phải được cập nhật trong cùng transaction với `replication_progress`. |
 
 Quyết định kiến trúc mới được bổ sung vào bảng này thông qua Pull Request.
 
@@ -252,14 +290,7 @@ Quyết định kiến trúc mới được bổ sung vào bảng này thông qu
 
 | Hạn chế | Hướng xử lý |
 |---|---|
-| `operation_log` chưa có `schema_version` của sự kiện | Migration bổ sung |
-| Outbox route S3 chưa lưu `policy_value`/`config_version` tại thời điểm chấp nhận sự kiện | Migration bổ sung |
-| Chưa lưu thành viên và ranh giới của lô S2 → S4 đang gửi | Migration bổ sung |
-| `processed_requests.event_id` bắt buộc, nên không lưu được kết quả của lệnh bị từ chối | Cho phép `NULL` để retry trả lại cùng kết quả từ chối |
-| `ReplicationTransport.DeliveryReceipt` chỉ có cờ `accepted`, chưa phân biệt `GAP_DETECTED`, `CONFLICT`, `STALE_EPOCH` | Thay bằng mã kết quả chi tiết |
+| Hợp đồng và schema hiện là V1: thiếu `request_id` trong sự kiện, `node_state.role`, `epoch_history`, RPC promote và liệt kê tồn kho; `route_id` gắn với tên node; chưa lưu thành viên lô S4 | Triển khai hợp đồng V2 (mục 3) |
 | RPC nội bộ chưa được xác thực, truyền plaintext | Xác thực bằng token trong metadata theo quyết định 7; chỉ triển khai trong LAN tin cậy |
-| Vai trò node lấy từ cấu hình (`NODE_ROLE`), không đổi được khi đang chạy | Thêm `node_state.role`; `NODE_ROLE` chỉ dùng làm giá trị khởi tạo |
-| Chưa có bảng `epoch_history` | Migration bổ sung |
-| Sự kiện chưa mang `request_id`, nên replica không thể chống trùng request sau khi được promote | Thêm `request_id` vào `ReplicationEvent` và `operation_log` |
-| Chưa có RPC promote và RPC liệt kê tồn kho | Thêm `NodeService.Promote` và `InventoryService.ListInventory` |
-| `PolicyUpdateRequest.route_id` gắn với tên node (`S1_TO_S3`, `S2_TO_S4`) | Đổi sang định danh theo chính sách (trễ, theo lô) và nhân bản thay đổi chính sách như một sự kiện |
+| Kết quả của lệnh bị từ chối chỉ lưu ở primary | Sau khi promote, retry của lệnh đó được xét lại từ đầu. Chấp nhận trong phạm vi đồ án |
+| Nguồn của S4 sập giữa epoch thì S4 dừng nhận | Chờ nguồn hoạt động trở lại hoặc promote; không tự đổi nguồn (quyết định 10) |
