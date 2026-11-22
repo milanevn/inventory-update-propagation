@@ -6,14 +6,18 @@ import edu.inventory.contracts.v1.NodeStatusRequest;
 import edu.inventory.node.config.NodeProperties;
 import io.grpc.Status;
 import io.grpc.stub.StreamObserver;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 import java.util.Map;
 
-/** First working vertical slice. The other RPCs are intentionally unimplemented. */
+/** NodeService.GetStatus. UpdatePolicy is not implemented yet (returns UNIMPLEMENTED). */
 @Service
 public class NodeStatusService extends NodeServiceGrpc.NodeServiceImplBase {
+    private static final Logger log = LoggerFactory.getLogger(NodeStatusService.class);
+
     private final NodeProperties properties;
     private final JdbcTemplate jdbc;
 
@@ -38,6 +42,7 @@ public class NodeStatusService extends NodeServiceGrpc.NodeServiceImplBase {
             responseObserver.onNext(reply);
             responseObserver.onCompleted();
         } catch (Exception error) {
+            log.warn("GetStatus failed: node database is unavailable ({})", error.getMessage());
             responseObserver.onError(Status.UNAVAILABLE.withDescription("node database is unavailable").asRuntimeException());
         }
     }

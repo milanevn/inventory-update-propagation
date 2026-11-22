@@ -7,12 +7,34 @@
     <dependency><groupId>io.grpc</groupId><artifactId>grpc-protobuf</artifactId></dependency>
     <dependency><groupId>io.grpc</groupId><artifactId>grpc-stub</artifactId></dependency>
     <dependency><groupId>javax.annotation</groupId><artifactId>javax.annotation-api</artifactId><version>1.3.2</version></dependency>
-    <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId><version>5.11.4</version><scope>test</scope></dependency>
+    <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId><scope>test</scope></dependency>
   </dependencies>
   <build><extensions><extension><groupId>kr.motd.maven</groupId><artifactId>os-maven-plugin</artifactId><version>1.7.1</version></extension></extensions>
+    <pluginManagement><plugins>
+      <!--
+        IDE (VS Code Java / Eclipse m2e) must NOT run protoc. Otherwise the IDE and the Maven CLI
+        write/delete contracts/target/protoc-dependencies and generated-sources concurrently, which
+        breaks `mvn clean verify` non-deterministically on Windows. Stubs are generated only by the
+        Maven CLI; build-helper below exposes them to the IDE. Ignored by the Maven CLI itself.
+      -->
+      <plugin><groupId>org.eclipse.m2e</groupId><artifactId>lifecycle-mapping</artifactId><version>1.0.0</version>
+        <configuration><lifecycleMappingMetadata><pluginExecutions>
+          <pluginExecution>
+            <pluginExecutionFilter><groupId>org.xolstice.maven.plugins</groupId><artifactId>protobuf-maven-plugin</artifactId><versionRange>[0.6.1,)</versionRange><goals><goal>compile</goal><goal>compile-custom</goal></goals></pluginExecutionFilter>
+            <action><ignore/></action>
+          </pluginExecution>
+        </pluginExecutions></lifecycleMappingMetadata></configuration>
+      </plugin>
+    </plugins></pluginManagement>
     <plugins><plugin><groupId>org.xolstice.maven.plugins</groupId><artifactId>protobuf-maven-plugin</artifactId><version>0.6.1</version>
       <configuration><protocArtifact>com.google.protobuf:protoc:${protobuf.version}:exe:${os.detected.classifier}</protocArtifact><pluginId>grpc-java</pluginId><pluginArtifact>io.grpc:protoc-gen-grpc-java:${grpc.version}:exe:${os.detected.classifier}</pluginArtifact></configuration>
       <executions><execution><goals><goal>compile</goal><goal>compile-custom</goal></goals></execution></executions>
+    </plugin>
+    <!-- Registers CLI-generated stubs as source folders so the IDE can resolve them without running protoc. -->
+    <plugin><groupId>org.codehaus.mojo</groupId><artifactId>build-helper-maven-plugin</artifactId><version>3.6.0</version>
+      <executions><execution><id>add-generated-grpc-sources</id><phase>generate-sources</phase><goals><goal>add-source</goal></goals>
+        <configuration><sources><source>${project.build.directory}/generated-sources/protobuf/java</source><source>${project.build.directory}/generated-sources/protobuf/grpc-java</source></sources></configuration>
+      </execution></executions>
     </plugin></plugins>
   </build>
 </project>

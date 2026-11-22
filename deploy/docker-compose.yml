@@ -27,8 +27,14 @@ services:
     <<: *postgres-base
     ports: ["127.0.0.1:5544:5432"]
     volumes: ["pg_s4:/var/lib/postgresql/data"]
+  # Integration tests only (AbstractNodeIT); never used by S1..S4.
+  pg-test:
+    <<: *postgres-base
+    ports: ["127.0.0.1:5549:5432"]
+    volumes: ["pg_test:/var/lib/postgresql/data"]
 volumes:
   pg_s1:
   pg_s2:
   pg_s3:
   pg_s4:
+  pg_test:

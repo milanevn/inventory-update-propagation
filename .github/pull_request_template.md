@@ -1,15 +1,20 @@
-## Summary / linked task
+## Mô tả
 
-## Contract or schema changes
-- [ ] No wire/schema changes
-- [ ] If changed, update ADR/docs + request Tech Lead review
+<!-- Thay đổi gì và vì sao. Liên kết issue: Closes #… -->
 
-## Test evidence
-- [ ] `mvn verify`
-- [ ] Unit tests for success, retries, and invalid input
-- [ ] Integration/E2E IDs covered: T...
-- [ ] Logs showing node / seq / event_id (if applicable)
+## Thay đổi hợp đồng và schema
 
-## Failure behavior / migration notes
+- [ ] Không thay đổi `.proto` hoặc schema
+- [ ] Có thay đổi `.proto` hoặc schema; `docs/thiet-ke.md` đã được cập nhật
+- [ ] Có migration mới `V<n>__…sql` (migration đã phát hành không bị sửa)
 
-## Reviewer
+## Kiểm thử
+
+- [ ] `mvnw verify` thành công, bao gồm integration test
+- [ ] Có test cho trường hợp thành công, retry và đầu vào không hợp lệ
+- [ ] Kịch bản nghiệm thu liên quan: T…
+- [ ] Log thể hiện `node_id`, `seq`, `event_id` (nếu liên quan)
+
+## Hành vi khi lỗi, migration và rollback
+
+<!-- Hệ thống phản ứng thế nào khi mất mạng, crash hoặc dữ liệu không hợp lệ; cách rollback nếu cần. -->

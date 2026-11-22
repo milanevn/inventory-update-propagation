@@ -1,19 +1,25 @@
 spring:
   application:
-    name: inventory-node
+    # Shown in every log line as [inventory-node-S1] etc., so logs of the four nodes are distinguishable.
+    name: inventory-node-${node.id}
   main:
     web-application-type: none
   datasource:
     url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5541}/${DB_NAME:inventory}
     username: ${DB_USER:inventory}
     password: ${DB_PASSWORD:local_only_change_me}
+    hikari:
+      # Fail fast when the node's own database is down (default 30 s would block gRPC threads and
+      # make clients see DEADLINE_EXCEEDED instead of an actionable UNAVAILABLE status).
+      connection-timeout: ${DB_CONNECTION_TIMEOUT_MS:2000}
+      validation-timeout: 1000
   flyway:
     enabled: true
 node:
   id: ${NODE_ID:S1}
   role: ${NODE_ROLE:PRIMARY}
   grpc-port: ${GRPC_PORT:9101}
-# TODO (TV2/TV3): Node peer endpoints and replication policy wiring.
+# Peer endpoints (host:port). Not consumed yet; reserved for the replication transport.
 cluster:
   peers:
     s1: ${PEER_S1:localhost:9101}

@@ -5,18 +5,23 @@ option java_package = "edu.inventory.contracts.v1";
 option java_multiple_files = true;
 
 // Wire contract v1. Business operations, replication, and node management
-// are intentionally separate. Internal RPCs require node authentication.
+// are intentionally separate services.
+//
+// Implementation status: only NodeService.GetStatus is implemented. Every other
+// RPC is part of the contract but currently returns UNIMPLEMENTED.
+// Internal RPCs (ReplicationService, NodeService.UpdatePolicy) are NOT authenticated
+// yet; node authentication is planned (docs/thiet-ke.md, "Hạn chế đã biết").
 service InventoryService {
-  rpc ExecuteCommand (CommandRequest) returns (CommandReply);
-  rpc GetInventory (InventoryQuery) returns (InventoryReply);
+  rpc ExecuteCommand (CommandRequest) returns (CommandReply);   // not implemented yet
+  rpc GetInventory (InventoryQuery) returns (InventoryReply);   // not implemented yet
 }
 service ReplicationService {
-  rpc ApplyEvents (EventBatch) returns (ApplyReply);
-  rpc FetchEvents (FetchRequest) returns (FetchReply);
+  rpc ApplyEvents (EventBatch) returns (ApplyReply);            // not implemented yet
+  rpc FetchEvents (FetchRequest) returns (FetchReply);          // not implemented yet
 }
 service NodeService {
-  rpc GetStatus (NodeStatusRequest) returns (NodeStatusReply);
-  rpc UpdatePolicy (PolicyUpdateRequest) returns (PolicyUpdateReply);
+  rpc GetStatus (NodeStatusRequest) returns (NodeStatusReply);  // implemented
+  rpc UpdatePolicy (PolicyUpdateRequest) returns (PolicyUpdateReply); // not implemented yet
 }
 
 enum OperationType {
@@ -61,7 +66,7 @@ message ReplicationEvent {
   string unit = 7;
   string voucher_no = 8;
   int64 quantity = 9;
-  string event_hash = 10; // optional validation of canonicalized event fields
+  string event_hash = 10; // reserved: not set or verified yet; hashing algorithm not defined
 }
 message EventBatch {
   string source_node_id = 1;
@@ -100,7 +105,7 @@ message NodeStatusReply {
   int64 epoch = 3;
   int64 last_issued_seq = 4;
   int64 last_applied_seq = 5;
-  string status = 6;
+  string status = 6; // currently always "READY" when the node's database answers
 }
 message PolicyUpdateRequest {
   string route_id = 1; // S1_TO_S3 or S2_TO_S4

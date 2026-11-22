@@ -1,153 +1,94 @@
-# Inventory Update Propagation — Assignment 8 Starter
+# Inventory Update Propagation
 
-**Vietnamese onboarding:** [README_VI.md](README_VI.md).
-
-**Team 5 · Delivery 18 December 2026 · Kickoff baseline 21 November 2026**
-
-This is an **initial executable skeleton**, not a finished inventory replication system. It includes documented module contracts, a working gRPC status service, a Java CLI smoke call, and a schema for four independent PostgreSQL nodes. Business operations, event dispatch/apply, retries, recovery and the JavaFX UI remain assigned implementation tasks. See [hand-over](docs/06-handover.md).
-
-## What the system will become
+Hệ thống quản lý nhập, xuất và tồn kho chạy trên bốn node độc lập. Các node đồng bộ với nhau bằng cơ chế lan truyền cập nhật được xây dựng ở tầng ứng dụng.
 
 ```text
-       Java CLI / optional JavaFX
-                   |
-              gRPC (RPC)
-                   |
-               S1 primary
-               /        \
-       immediate      n-second delay
-             /            \
-           S2              S3
-            |
-       every n applied events
-            |
-           S4
+Client ──gRPC──> S1 PRIMARY ──ngay lập tức──> S2 REPLICA ──mỗi n cập nhật──> S4 REPLICA
+                     └──────── sau n giây ─────────> S3 REPLICA
 ```
 
-Each server is a separate JVM with a separate PostgreSQL instance. The codebase must implement logical replication; **PostgreSQL built-in replication is prohibited** for project flows.
+> **Trạng thái: sẵn sàng phát triển, chưa demo được nghiệp vụ.** Đã có: hợp đồng gRPC, schema, hạ tầng chạy 4 node độc lập, `NodeService.GetStatus` và hạ tầng kiểm thử. Nghiệp vụ kho, replication và phục hồi **chưa được triển khai**. Bốn node khởi động và trả `READY` chỉ chứng minh node chạy và kết nối được cơ sở dữ liệu, **chưa** chứng minh dữ liệu được đồng bộ. Chi tiết ở mục [Trạng thái tính năng](#trạng-thái-tính-năng).
 
-## Pinned stack
-- Java 21, Maven 3.9+, Spring Boot (non-web), Spring JDBC/Flyway
-- gRPC Java + Protobuf; PostgreSQL 16 local demo
-- `contracts` = `.proto` / generated gRPC stubs
-- `common-domain` = independent domain models and ports
-- `node-server` = single executable for S1..S4
-- `cli-client` = sample NodeStatus RPC (JavaFX is future work)
+## Mục tiêu thiết kế
 
-Versions are pinned in [pom.xml](pom.xml). Versions/downloads have **not** been verified from the network by the authoring environment; perform `mvn verify` on developer machine or CI before starting feature work.
+Các mục dưới đây là thiết kế mục tiêu, đặc tả trong [docs/thiet-ke.md](docs/thiet-ke.md):
 
-## Quick start — local four-node smoke
+- **Một node ghi duy nhất (single-writer).** Mọi thao tác ghi đi qua primary. Mỗi giao dịch ghi dữ liệu nghiệp vụ, operation log và outbox trong cùng một transaction PostgreSQL.
+- **Ba chính sách lan truyền, cấu hình được:**
+  - S1 → S2: gửi ngay sau khi commit;
+  - S1 → S3: gửi sau tối thiểu *n* giây;
+  - S2 → S4: gửi theo lô đủ *n* cập nhật.
+- **Giao nhận an toàn khi có lỗi.** At-least-once kết hợp apply idempotent; sự kiện sắp thứ tự theo `(epoch, seq)`; phát hiện trùng lặp và thiếu sự kiện.
+- **Thay thế primary có kiểm soát.** Khi S1 sập (hoặc S1 và S2 cùng sập), một lệnh `promote` đưa node còn hoạt động có dữ liệu mới nhất lên làm primary; fencing bằng epoch đảm bảo không bao giờ có hai node cùng nhận ghi. S3 hoặc S4 sập không ảnh hưởng tới hoạt động của hệ thống.
+- **Phục hồi dữ liệu bằng replay.** Node có dữ liệu bị tổn hại được dựng lại từ operation log của node nguồn.
+- **Hai mô hình triển khai, một mã nguồn:** bốn node trên một máy, hoặc bốn máy vật lý trong mạng LAN.
 
-Prerequisites: **JDK 21**, **Maven 3.9+**, and either Docker Compose or four independent local PostgreSQL instances.
+Replication được xây dựng hoàn toàn trong ứng dụng; không sử dụng streaming hay logical replication của PostgreSQL.
 
-1. Start **four separate PostgreSQL containers** (only data services run in Compose):
+## Công nghệ
 
-   ```bash
-   docker compose -f deploy/docker-compose.yml up -d
-   ```
+Java 21 · Spring Boot (non-web) · gRPC + Protocol Buffers · PostgreSQL 16 · Spring JDBC + Flyway · Maven (wrapper) · JUnit 5 · GitHub Actions
 
-2. Build all modules (first time Maven downloads dependencies):
+## Yêu cầu hệ thống
 
-   ```bash
-   mvn -B -ntp clean install
-   ```
+- JDK 21
+- PostgreSQL 16 (bản server binaries hoặc bộ cài; tùy chọn: Docker)
+- Windows 10/11 với PowerShell 5.1+, hoặc Linux/macOS với Bash
 
-3. Start the four JVMs on Linux, macOS or Git Bash:
+Không cần cài Maven; repository có kèm Maven Wrapper.
 
-   ```bash
-   ./scripts/run-local.sh
-   ```
+## Bắt đầu nhanh
 
-   On **Windows PowerShell**:
-
-   ```powershell
-   .\scripts\run-local.ps1
-   ```
-
-   Or launch a single S1 manually:
-
-   ```powershell
-   $env:NODE_ID='S1'
-   $env:NODE_ROLE='PRIMARY'
-   $env:GRPC_PORT='9101'
-   $env:DB_PORT='5541'
-   java -jar .\node-server\target\node-server-0.1.0-SNAPSHOT.jar
-   ```
-
-4. From another terminal, call the **implemented** gRPC NodeService.GetStatus:
-
-   ```bash
-   mvn -pl cli-client exec:java -Dexec.mainClass=edu.inventory.cli.NodeStatusCli -Dexec.args=localhost:9101
-   ```
-
-   Expected shape: `node=S1 role=PRIMARY epoch=1 issued=0 applied=0 status=READY`.
-
-   Try 9102..9104 for S2..S4. **Other gRPC methods are contracts only and are not implemented yet**.
-
-5. Stop nodes with `./scripts/stop-local.sh` (Linux/macOS/Git Bash) or close the PowerShell consoles. Stop DB containers with `docker compose -f deploy/docker-compose.yml down` (keep volumes). **Do not use `down -v` unless you deliberately want to delete local databases.**
-
-### No Docker?
-Install/configure four **independent PostgreSQL instances** with distinct storage directories and ports 5541..5544, each with user `inventory`, database `inventory` and a local password. Or run on four machines with one PostgreSQL per machine (local DB port normally 5432). Set `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD` on each JVM accordingly. Do not fake failure isolation using four databases in a single PostgreSQL process.
-
-## Physical hosts — one JVM + DB per machine
-
-Each server has Java 21 and its own PostgreSQL database. Set host-specific environment variables, e.g. on S2:
-
-```bash
-export NODE_ID=S2 NODE_ROLE=REPLICA GRPC_PORT=9100
-export DB_HOST=127.0.0.1 DB_PORT=5432 DB_NAME=inventory
-export DB_USER=inventory DB_PASSWORD='<set-locally>'
-java -jar node-server/target/node-server-0.1.0-SNAPSHOT.jar
+```powershell
+.\scripts\local-pg.ps1 init          # khởi tạo PostgreSQL cho S1..S4 (5541..5544) và TEST (5549)
+.\scripts\doctor.ps1                 # kiểm tra môi trường
+.\mvnw.cmd -B -ntp clean install     # build, unit test và integration test
+.\scripts\run-local.ps1              # chạy S1..S4 (gRPC 9101..9104), chờ đến khi READY
+.\scripts\cluster-status.ps1         # truy vấn trạng thái các node
 ```
 
-CLI from another LAN host: change `localhost:9101` to `<S2-LAN-IP>:9100`. Allow gRPC traffic on the node's firewall. `NodeService.GetStatus` **is not yet authenticated or TLS-protected**, so restrict the initial smoke demo to an isolated trusted LAN. Implement authenticated secure channels before any wider networking. **Peer routing / replication is not implemented in this starter**; TV2/TV3 will add peer config/transport and physical-host tests.
-
-## Source layout
+Kết quả mong đợi:
 
 ```text
-contracts/                Protobuf wire API, generated stubs
-common-domain/            EventEnvelope + ReplicationTransport port
-node-server/              Spring non-web node, gRPC status, Flyway DDL
-cli-client/               GetStatus client smoke
-scripts/                  local multi-JVM launcher + offline structural audit
-deploy/                   Docker Compose (PostgreSQL only)
-docs/                     requirements, architecture, protocol, recovery,
-                          test plan, ownership, ADRs, source provenance
-.github/workflows/        Maven verify CI
+localhost:9101 -> node=S1 role=PRIMARY epoch=1 issued=0 applied=0 status=READY
+localhost:9102 -> node=S2 role=REPLICA epoch=1 issued=0 applied=0 status=READY
+...
 ```
 
-## Scope and limitations
+Dừng cụm: `.\scripts\stop-local.ps1`, rồi `.\scripts\local-pg.ps1 stop`. Hướng dẫn cài đặt PostgreSQL, triển khai trên nhiều máy và xử lý sự cố có trong [docs/van-hanh.md](docs/van-hanh.md).
 
-| Starter capability | Status |
+## Cấu trúc repository
+
+| Đường dẫn | Nội dung |
 |---|---|
-| Maven multi-module & protocol contract | Provided, **not yet Maven-verified here** |
-| Four independent database containers | Compose configured; **not yet runtime-tested here** |
-| Flyway business/replication schema | Authored; needs PostgreSQL execution validation |
-| gRPC NodeService.GetStatus | Code authored; needs Maven build/smoke |
-| CLI GetStatus | Code authored; needs build/smoke |
-| InventoryService.ExecuteCommand/GetInventory | **Not implemented** |
-| ReplicationService.ApplyEvents/FetchEvents | **Not implemented** |
-| Immediate/delay/batch workers | **Not implemented** |
-| Recovery/snapshot/manual promotion | **Not implemented** |
-| Authenticated/TLS inter-node RPC | **Not implemented** |
-| JavaFX UI and fault-injection E2E | **Not implemented** |
+| `contracts/` | Hợp đồng gRPC (`.proto`) và stub Java sinh tự động |
+| `common-domain/` | Mô hình domain và port, độc lập với tầng transport |
+| `node-server/` | Server dùng chung cho S1..S4: gRPC, nghiệp vụ, replication, recovery, migration Flyway |
+| `cli-client/` | Client dòng lệnh |
+| `scripts/` | Script vận hành: PostgreSQL cục bộ, chạy và dừng node, kiểm tra môi trường |
+| `deploy/` | Docker Compose cho PostgreSQL (tùy chọn) |
+| `docs/` | Tài liệu thiết kế, kiểm thử và vận hành |
 
-This is *not* automatically failover-safe. Primary acknowledgement after local commit does **not** mean the update has reached a replica. See [recovery limitations](docs/04-recovery.md).
+## Trạng thái tính năng
 
-## Work process
-1. Read [requirements](docs/01-requirements.md), [architecture](docs/02-architecture.md) and [wire semantics](docs/03-protocol.md).
-2. Agree on open assumptions before contracts freeze.
-3. Create a GitHub private repository (owner action), push `main` and `develop` and protect both branches.
-4. Assign [workstreams](docs/06-handover.md), open small PRs into `develop`.
-5. For every PR, run `mvn -B -ntp verify` (CI included). Use separate PostgreSQL/Java processes for integration tests; current starter CI does **not** run database-backed E2E.
+| Thành phần | Trạng thái |
+|---|---|
+| Khởi chạy 4 node độc lập, mỗi node một PostgreSQL; `NodeService.GetStatus` | Hoàn thành |
+| Hạ tầng kiểm thử (unit test, integration test với PostgreSQL), CI | Hoàn thành |
+| Hợp đồng gRPC v1, schema và migration V1 | Hoàn thành; có bổ sung dự kiến, xem [Hạn chế đã biết](docs/thiet-ke.md#6-hạn-chế-đã-biết) |
+| Nghiệp vụ nhập, xuất, tồn kho (`InventoryService`) | Chưa triển khai; mới có hợp đồng |
+| Replication engine, ba chính sách lan truyền (`ReplicationService`) | Chưa triển khai; mới có hợp đồng |
+| Thay đổi chính sách khi đang chạy (`NodeService.UpdatePolicy`) | Chưa triển khai; mới có hợp đồng |
+| Kết nối giữa các node (`cluster.peers`) | Chưa triển khai; mới khai báo cấu hình |
+| Phục hồi dữ liệu, catch-up, thay thế primary (`promote`) | Chưa triển khai |
+| Xác thực RPC nội bộ | Chưa triển khai |
+| Docker Compose, triển khai trên 4 máy vật lý | Đã có cấu hình và hướng dẫn; chưa kiểm thử |
 
-## Initial repo after unzipping
-The supplied ZIP preserves a local `.git` directory with an initial commit and `main` / `develop` branches. It has **no GitHub remote configured**. The team owner must create their own remote repository and run:
+## Tài liệu
 
-```bash
-git remote add origin <YOUR-GITHUB-REPO-URL>
-git push -u origin main
-git push -u origin develop
-```
+- [Thiết kế hệ thống](docs/thiet-ke.md): yêu cầu, kiến trúc, giao thức, phục hồi, quyết định kiến trúc
+- [Kiểm thử](docs/kiem-thu.md): kịch bản nghiệm thu T01–T22, quy ước viết test
+- [Vận hành](docs/van-hanh.md): cài đặt, cấu hình, triển khai, xử lý sự cố
+- [Hướng dẫn đóng góp](CONTRIBUTING.md)
 
-Do not commit `.env` secrets. Defaults in sample files are **local/demo-only**.
+Dự án được phát triển trong khuôn khổ học phần Các hệ thống phân tán.
