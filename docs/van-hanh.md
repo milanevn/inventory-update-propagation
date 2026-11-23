@@ -1,37 +1,49 @@
 # Vận hành
 
-## Cài đặt
+## 1. Cài đặt
 
 | Thành phần | Phiên bản | Ghi chú |
 |---|---|---|
-| JDK | 21 | Bắt buộc. Nếu đặt `JAVA_HOME` thì phải trỏ tới JDK 21 |
+| JDK | 21 | Nếu đặt `JAVA_HOME` thì phải trỏ tới JDK 21 |
+| PostgreSQL | 16.x | Bản *binaries* ZIP của EDB (không cần quyền Administrator, không tạo Windows service) hoặc bộ cài chính thức |
 | Maven | — | Không cần cài; dùng Maven Wrapper (`mvnw.cmd`, `./mvnw`) |
-| PostgreSQL | 16.x | Bản server binaries (ZIP) hoặc bộ cài chính thức. Docker là tùy chọn |
 
-**PostgreSQL trên Windows.** Có hai cách:
-- Dùng bản *binaries* ZIP chính thức của EDB: không cần quyền Administrator và không tạo Windows service. Thư mục `pgAdmin 4` trong gói ZIP không được dự án sử dụng và có thể xóa.
-- Dùng bộ cài chính thức.
-
-Script tìm thư mục `bin` của PostgreSQL theo thứ tự:
-1. biến môi trường `PG_BIN`;
-2. `PATH`;
-3. `%ProgramFiles%\PostgreSQL\16\bin`.
+Script tìm thư mục `bin` của PostgreSQL theo thứ tự: biến `PG_BIN`, `PATH`, rồi `%ProgramFiles%\PostgreSQL\16\bin`. Để đặt `PG_BIN` cố định:
 
 ```powershell
 [Environment]::SetEnvironmentVariable('PG_BIN', '<thư mục PostgreSQL>\bin', 'User')
 ```
 
-Sau khi cài đặt, chạy `.\scripts\doctor.ps1`. Script này kiểm tra JDK, PostgreSQL, các instance, cổng mạng, artifact build và cấu hình Git, rồi đưa ra hướng khắc phục cho từng mục chưa đạt.
+Sau khi cài, chạy `.\scripts\doctor.ps1`. Script kiểm tra JDK, PostgreSQL, các instance, cổng mạng, artifact build và cấu hình Git, rồi chỉ cách khắc phục từng mục chưa đạt.
 
-## Cấu hình
+## 2. Vận hành cụm cục bộ
 
-| Node | Vai trò | Cổng gRPC | Cổng PostgreSQL |
+Lần chạy đầu tiên: xem [Bắt đầu nhanh](../README.md#bắt-đầu-nhanh) trong README.
+
+| Việc | Lệnh |
+|---|---|
+| Chạy lại cụm ở lần sau | `.\scripts\local-pg.ps1 start`, rồi `.\scripts\run-local.ps1` |
+| Xem trạng thái | `.\scripts\cluster-status.ps1` |
+| Xem log | `logs\s1.log` … `logs\s4.log` |
+| Dừng một node (giả lập crash) | `.\scripts\stop-local.ps1 -Node S2` |
+| Chạy lại một node | `.\scripts\run-local.ps1 -Node S2` |
+| Dừng cơ sở dữ liệu của một node | `.\scripts\local-pg.ps1 stop -Node S2` |
+| Dừng cả cụm | `.\scripts\stop-local.ps1`, rồi `.\scripts\local-pg.ps1 stop` |
+| Xóa dữ liệu và bắt đầu lại | `.\scripts\stop-local.ps1`, `.\scripts\local-pg.ps1 reset -Force`, `.\scripts\run-local.ps1` |
+
+Dữ liệu PostgreSQL nằm ở `%LOCALAPPDATA%\inventory-replication\pg`.
+
+**Docker (tùy chọn).** `docker compose -f deploy/docker-compose.yml up -d` tạo PostgreSQL cho S1..S4 và TEST trên cùng các cổng, thay cho `local-pg.ps1`. Khi dừng, dùng `down` không kèm `-v` để giữ dữ liệu.
+
+## 3. Cấu hình
+
+| Node | Vai trò mặc định | Cổng gRPC | Cổng PostgreSQL |
 |---|---|---|---|
 | S1 | PRIMARY | 9101 | 5541 |
 | S2, S3, S4 | REPLICA | 9102, 9103, 9104 | 5542, 5543, 5544 |
-| TEST | Chỉ dùng cho integration test | — | 5549 |
+| TEST | Chỉ cho integration test | — | 5549 |
 
-Biến môi trường của node (giá trị mặc định nằm trong `node-server/src/main/resources/application.yml`):
+Biến môi trường của node (mặc định trong `node-server/src/main/resources/application.yml`):
 
 | Biến | Ý nghĩa | Mặc định |
 |---|---|---|
@@ -39,56 +51,39 @@ Biến môi trường của node (giá trị mặc định nằm trong `node-ser
 | `NODE_ROLE` | `PRIMARY` hoặc `REPLICA` | `PRIMARY` |
 | `GRPC_PORT` | Cổng gRPC, bind trên mọi interface | `9101` |
 | `DB_HOST`, `DB_PORT`, `DB_NAME` | Cơ sở dữ liệu của node | `localhost`, `5541`, `inventory` |
-| `DB_USER`, `DB_PASSWORD` | Tài khoản cơ sở dữ liệu | `inventory` / `local_only_change_me`. Chỉ dùng cho môi trường cục bộ; đặt giá trị riêng khi triển khai |
+| `DB_USER`, `DB_PASSWORD` | Tài khoản cơ sở dữ liệu | `inventory` / `local_only_change_me` (chỉ dùng cục bộ) |
 | `DB_CONNECTION_TIMEOUT_MS` | Thời gian chờ lấy kết nối | `2000` |
 | `PEER_S1` … `PEER_S4` | Địa chỉ `host:port` của các node | `localhost:9101` … `localhost:9104` |
 
-Biến dành cho `local-pg.ps1`:
-- `PG_BIN`: thư mục `bin` của PostgreSQL.
-- `INVENTORY_PG_DATA`: thư mục dữ liệu, mặc định `%LOCALAPPDATA%\inventory-replication\pg`.
-- `DB_PASSWORD`: mật khẩu tài khoản cơ sở dữ liệu.
+`local-pg.ps1` dùng thêm `PG_BIN`, `INVENTORY_PG_DATA` (thư mục dữ liệu) và `DB_PASSWORD`.
 
-## Script vận hành
+## 4. Script
 
-| Lệnh | Chức năng |
+| Script | Chức năng |
 |---|---|
-| `doctor.ps1` | Kiểm tra môi trường (chỉ đọc) |
+| `doctor.ps1` | Kiểm tra môi trường; chỉ đọc |
 | `local-pg.ps1 init\|start\|stop\|status [-Node S1..S4\|TEST]` | Quản lý các PostgreSQL instance độc lập |
-| `local-pg.ps1 reset [-Node …] [-Force]` | Xóa và tạo lại cơ sở dữ liệu `inventory`; Flyway migrate lại khi node khởi động |
-| `local-pg.ps1 destroy [-Node …] [-Force]` | Xóa toàn bộ thư mục dữ liệu của instance |
-| `run-local.ps1 [-Node Sx] [-NoWait]` | Chạy node ở nền và chờ đến khi `READY`; báo nguyên nhân và trả mã lỗi 1 nếu node không khởi động được |
-| `stop-local.ps1 [-Node Sx]` | Dừng node. Trên Windows, việc dừng tương đương crash: shutdown hook không được thực thi |
-| `run-node.ps1 -Id Sx` | Chạy một node ở foreground (dùng cho triển khai vật lý); `Ctrl+C` để dừng có kiểm soát |
-| `cluster-status.ps1 [host:port …]` | Gọi `GetStatus`; mặc định truy vấn 4 node cục bộ |
-| `run-local.sh`, `stop-local.sh` | Chạy và dừng 4 node trên Linux, macOS và Git Bash. Phiên bản rút gọn: không chờ `READY`, không kiểm tra PID trước khi dừng, không quản lý PostgreSQL |
+| `local-pg.ps1 reset\|destroy [-Node …] [-Force]` | `reset`: xóa và tạo lại database (Flyway migrate lại khi node khởi động). `destroy`: xóa cả thư mục dữ liệu |
+| `run-local.ps1 [-Node Sx] [-NoWait]` | Chạy node ở nền, chờ `READY`; node không lên được thì in nguyên nhân và trả mã lỗi 1 |
+| `stop-local.ps1 [-Node Sx]` | Dừng node. Trên Windows tương đương crash: shutdown hook không chạy |
+| `run-node.ps1 -Id Sx` | Chạy một node ở foreground (dùng khi triển khai nhiều máy); `Ctrl+C` để dừng có kiểm soát |
+| `cluster-status.ps1 [host:port …]` | Gọi `GetStatus`; mặc định hỏi 4 node cục bộ |
+| `run-local.sh`, `stop-local.sh` | Bản rút gọn cho Linux, macOS, Git Bash: không chờ `READY`, không kiểm tra PID, không quản lý PostgreSQL |
 
-Log của node được ghi tại `logs/sN.log`.
+Các script chạy node đặt sẵn tùy chọn JVM khởi động nhanh (quyết định 8 trong [thiet-ke.md](thiet-ke.md#7-quyết-định-kỹ-thuật)).
 
-**Lệnh build:**
+## 5. Triển khai trên 4 máy
 
-| Mục đích | Lệnh |
-|---|---|
-| Build và chạy toàn bộ test | `.\mvnw.cmd -B -ntp clean install` |
-| Build nhanh khi chỉ thay đổi `node-server` (yêu cầu đã chạy `install` một lần) | `.\mvnw.cmd -o -pl node-server package -DskipTests` |
+Mỗi máy chạy một node và một PostgreSQL. PostgreSQL chỉ lắng nghe trên `localhost`; chỉ cổng gRPC được mở ra mạng LAN. gRPC truyền plaintext, nên chỉ triển khai trong mạng LAN tin cậy.
 
-**Docker (tùy chọn).** `docker compose -f deploy/docker-compose.yml up -d` khởi tạo PostgreSQL cho S1..S4 (5541..5544) và TEST (5549), thay cho `local-pg.ps1`. Khi dừng, dùng `down` mà không kèm `-v` để giữ lại dữ liệu.
-
-## Triển khai trên nhiều máy
-
-Mỗi máy chạy một node và một PostgreSQL. PostgreSQL chỉ lắng nghe trên `localhost`; chỉ cổng gRPC của node được mở ra mạng LAN.
-
-> Ở phiên bản hiện tại, các node chưa gọi lẫn nhau (`cluster.peers` chưa được sử dụng). Quy trình dưới đây kiểm tra được việc khởi động, kết nối mạng và gRPC giữa các máy, **chưa** kiểm tra được đồng bộ dữ liệu.
-
-1. **Trên mỗi máy:**
-   - checkout cùng một commit, rồi chạy `.\mvnw.cmd -B -ntp clean install`;
-   - cài PostgreSQL 16 và khởi tạo instance của node đó, ví dụ `.\scripts\local-pg.ps1 init -Node S2`.
-2. **Mở cổng gRPC trên firewall.** Lệnh cần quyền Administrator; mạng phải ở chế độ *Private*. Sau khi kết thúc, gỡ rule bằng `Remove-NetFirewallRule`.
+1. **Trên mỗi máy:** checkout cùng một commit, chạy `.\mvnw.cmd -B -ntp clean install`, cài PostgreSQL 16 và khởi tạo instance của node đó, ví dụ `.\scripts\local-pg.ps1 init -Node S2`.
+2. **Mở cổng gRPC trên firewall** (cần quyền Administrator, mạng ở chế độ *Private*; gỡ bằng `Remove-NetFirewallRule` khi xong):
 
    ```powershell
    New-NetFirewallRule -DisplayName "inventory-node S2 gRPC" -Direction Inbound -Protocol TCP -LocalPort 9102 -Action Allow -Profile Private
    ```
 
-3. **Khởi động** theo thứ tự S4, S3, S2, S1. Địa chỉ peer được truyền qua biến môi trường:
+3. **Khởi động** theo thứ tự S4, S3, S2, S1, với địa chỉ peer qua biến môi trường:
 
    ```powershell
    $env:PEER_S1 = '<ip-s1>:9101'
@@ -98,22 +93,42 @@ Mỗi máy chạy một node và một PostgreSQL. PostgreSQL chỉ lắng nghe 
    .\scripts\run-node.ps1 -Id S2
    ```
 
-4. **Kiểm tra** từ máy client: `.\scripts\cluster-status.ps1 <ip-s1>:9101 <ip-s2>:9102 <ip-s3>:9103 <ip-s4>:9104`. Nếu một node trả lời khi gọi qua `localhost` trên chính máy đó nhưng không trả lời khi gọi từ máy khác, nguyên nhân là firewall.
+4. **Kiểm tra** từ máy client: `.\scripts\cluster-status.ps1 <ip-s1>:9101 <ip-s2>:9102 <ip-s3>:9103 <ip-s4>:9104`. Node trả lời qua `localhost` trên chính máy đó nhưng không trả lời từ máy khác thì nguyên nhân là firewall.
 
-**Lưu ý bảo mật:**
-- gRPC hiện truyền plaintext và chưa xác thực; chỉ triển khai trong mạng LAN tin cậy.
-- Không mở cổng PostgreSQL ra mạng.
+## 6. Quy trình xử lý sự cố
 
-## Xử lý sự cố
+Các bước người vận hành thực hiện khi cụm gặp sự cố. Cơ chế phía sau mỗi quy trình được mô tả ở [thiết kế, mục 6](thiet-ke.md#6-sự-cố-và-phục-hồi). Lệnh cụ thể được bổ sung vào từng quy trình cùng Pull Request triển khai tính năng tương ứng.
+
+### 6.1. S1 sập
+
+Xác nhận S1 không còn trả lời, rồi chạy `promote` để đưa node mới nhất trong S2, S3, S4 lên làm primary (thiết kế: [Promote](thiet-ke.md#promote)).
+
+### 6.2. S1 và S2 cùng sập
+
+Như 6.1; ứng viên là node mới nhất trong S3, S4, tuyến lan truyền đổi theo bảng tuyến trong thiết kế.
+
+### 6.3. Primary cũ quay lại
+
+Khởi động lại node như bình thường; node tự chuyển thành replica, in danh sách cập nhật đã mất và đồng bộ lại (thiết kế: [Primary cũ quay lại](thiet-ke.md#primary-cũ-quay-lại)).
+
+### 6.4. Replica hỏng hoặc mất dữ liệu
+
+Node bị cách ly khi kiểm tra bất biến thất bại; phục hồi bằng replay operation log (thiết kế: [Phục hồi dữ liệu](thiet-ke.md#phục-hồi-dữ-liệu)).
+
+### 6.5. Đổi `delaySeconds` hoặc `batchSize` khi đang chạy
+
+Gửi yêu cầu đổi chính sách tới primary; giá trị mới áp dụng cho sự kiện mới và từ lô kế tiếp (thiết kế: [Ba chính sách lan truyền](thiet-ke.md#ba-chính-sách-lan-truyền)).
+
+## 7. Lỗi thường gặp
 
 | Triệu chứng | Nguyên nhân và cách khắc phục |
 |---|---|
-| `Unable to clean up temporary proto file directory`, thiếu class `*Grpc`, hoặc `Proto path element is not a directory` | Một tiến trình khác (IDE hoặc một lệnh Maven khác) đang build vào `contracts/target`. Không chạy đồng thời hai lệnh Maven. Trong VS Code, chấp nhận cập nhật cấu hình project khi được hỏi. |
-| IDE không nhận diện `NodeServiceGrpc` | Stub chỉ được sinh bởi Maven: chạy `mvnw clean install`, sau đó *Java: Clean Java Language Server Workspace*. |
-| `clean` không xóa được file `.jar` | File jar đang được node sử dụng; chạy `stop-local.ps1` trước khi build. |
-| Node dừng ngay, log có `Connection to localhost:554x refused` | PostgreSQL của node chưa chạy: kiểm tra bằng `local-pg.ps1 status`, rồi khởi động bằng `start`. |
-| `FlywayValidateException`, `checksum mismatch` hoặc `Detected applied migration not resolved locally` | Cơ sở dữ liệu cục bộ chứa migration từ một nhánh khác. Chạy `stop-local.ps1`, rồi `local-pg.ps1 reset -Force`, rồi `run-local.ps1`. |
-| Node dừng, log có `OutOfMemoryError: Java heap space` | Script khởi động node giới hạn heap ở `-Xmx256m` (quyết định 8 trong [thiet-ke.md](thiet-ke.md#5-quyết-định-kiến-trúc)). Tăng giá trị trong `run-local.ps1`, `run-node.ps1` và `run-local.sh`, đồng thời cập nhật quyết định. |
-| `Cannot bind gRPC port 910x` | Cổng đã bị chiếm; dùng `doctor.ps1` để xác định tiến trình đang giữ cổng. |
-| Log có `INTEGRATION TESTS SKIPPED` | Instance `TEST` chưa chạy: `local-pg.ps1 start -Node TEST`. |
-| Cảnh báo `flyway-community-db-support … 401` hoặc `Mockito is currently self-attaching` | Không ảnh hưởng; có thể bỏ qua. |
+| `Unable to clean up temporary proto file directory`, thiếu class `*Grpc`, hoặc `Proto path element is not a directory` | Một tiến trình khác (IDE hoặc lệnh Maven khác) đang build vào `contracts/target`. Không chạy đồng thời hai lệnh Maven; trong VS Code, chấp nhận cập nhật cấu hình project khi được hỏi. |
+| IDE không nhận diện `NodeServiceGrpc` | Stub chỉ được sinh bởi Maven: chạy `mvnw clean install`, rồi *Java: Clean Java Language Server Workspace*. |
+| `clean` không xóa được file `.jar` | Node đang dùng file jar; chạy `stop-local.ps1` trước khi build. |
+| Node dừng ngay, log có `Connection to localhost:554x refused` | PostgreSQL của node chưa chạy: `local-pg.ps1 status`, rồi `start`. |
+| `FlywayValidateException`, `checksum mismatch` hoặc `Detected applied migration not resolved locally` | Database cục bộ chứa migration từ nhánh khác: làm theo dòng "Xóa dữ liệu và bắt đầu lại" ở mục 2. |
+| Node dừng, log có `OutOfMemoryError: Java heap space` | Script giới hạn heap ở `-Xmx256m`. Tăng giá trị trong `run-local.ps1`, `run-node.ps1`, `run-local.sh` và cập nhật quyết định 8. |
+| `Cannot bind gRPC port 910x` | Cổng đã bị chiếm; `doctor.ps1` chỉ ra tiến trình đang giữ cổng. |
+| Log build có `INTEGRATION TESTS SKIPPED` | Instance TEST chưa chạy: `.\scripts\local-pg.ps1 start -Node TEST`. |
+| Cảnh báo `flyway-community-db-support … 401` hoặc `Mockito is currently self-attaching` | Không ảnh hưởng; bỏ qua. |

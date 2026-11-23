@@ -1,79 +1,70 @@
 # Hướng dẫn đóng góp
 
-## Thiết lập môi trường phát triển
+## 1. Chuẩn bị
 
-1. Cài JDK 21 và PostgreSQL 16 theo [docs/van-hanh.md](docs/van-hanh.md#cài-đặt).
-2. Khởi tạo cơ sở dữ liệu cục bộ, rồi kiểm tra môi trường; kết quả kiểm tra không được có dòng `FAIL`:
+1. Làm theo [Bắt đầu nhanh](README.md#bắt-đầu-nhanh) đến khi cả 4 node `READY` và integration test không bị bỏ qua.
+2. Đặt `git config user.name` và `user.email` khớp tài khoản GitHub (nên dùng email noreply của GitHub). Trên Windows, đặt thêm `git config core.fileMode false`.
+3. Đọc [docs/thiet-ke.md](docs/thiet-ke.md) trước khi sửa phần replication, phục hồi hoặc giao thức.
+4. Nếu dùng AI coding agent: quy tắc cho agent nằm trong [AGENTS.md](AGENTS.md) (Claude Code đọc qua `CLAUDE.md`). Agent không thay thế việc tự review trước khi mở Pull Request.
 
-   ```powershell
-   .\scripts\local-pg.ps1 init
-   .\scripts\doctor.ps1
-   ```
+## 2. Nhánh và Pull Request
 
-3. Build và chạy toàn bộ test. Integration test không được bị bỏ qua:
+| Nhánh | Vai trò |
+|---|---|
+| `main` | Phiên bản ổn định: luôn build, test và chạy được cụm 4 node. Chỉ nhận Pull Request từ `develop`. |
+| `develop` | Nhánh tích hợp: nơi các phần được ghép và chạy cùng nhau. Nhận Pull Request từ các nhánh `feature/*`. |
+| `feature/<module>-<mo-ta-ngan>` | Mỗi việc một nhánh, tạo từ `develop`, xóa sau khi merge. Ví dụ: `feature/contracts-v2`, `feature/replication-apply-events`, `feature/policy-delay-s3`. |
 
-   ```powershell
-   .\mvnw.cmd -B -ntp clean install
-   ```
+`<module>` là tên module hoặc package trong [thiết kế](docs/thiet-ke.md#3-kiến-trúc) (`inventory`, `replication`, `policy`, `recovery`, `contracts`, `cli`...), hoặc `docs`, `scripts`. Sửa lỗi cũng dùng nhánh `feature/*`. Không tạo loại nhánh khác.
 
-4. Chạy cụm, kiểm tra cả 4 node đều `READY`:
+Tách `main` và `develop` để lỗi phát sinh khi ghép các phần nằm lại ở `develop`, không làm hỏng phiên bản đang chạy được; mỗi lần đưa `develop` lên `main` là một mốc có thể quay lại.
 
-   ```powershell
-   .\scripts\run-local.ps1
-   .\scripts\cluster-status.ps1
-   ```
+- Không push trực tiếp lên `main` hoặc `develop`; mọi thay đổi đi qua Pull Request.
+- Trước khi mở Pull Request: cập nhật `develop` mới nhất vào nhánh của mình và chạy `mvnw verify`.
+- Pull Request nhỏ, một mục đích, ghi rõ mã công việc và kịch bản nghiệm thu liên quan.
+- Merge khi có ít nhất một approve và CI xanh. Thay đổi giao thức, schema hoặc quyền ghi của primary cần maintainer duyệt.
+- Đưa `develop` lên `main`: maintainer mở Pull Request khi các kịch bản nghiệm thu của mốc đều đạt, merge bằng merge commit (không squash) và gắn tag `v0.<n>.0`.
+- Commit message theo [Conventional Commits](https://www.conventionalcommits.org/), scope là tên module, ví dụ `feat(replication): apply contiguous event batch`, `fix(inventory): reject stock out below zero`.
 
-Cấu hình Git: đặt `user.name` và `user.email` khớp với tài khoản GitHub. Trên Windows, đặt thêm `core.fileMode false`.
+## 3. Quy ước code
 
-## Quy trình làm việc
+- **Giao thức:** `contracts/src/main/proto/inventory.proto` là nguồn chuẩn duy nhất. Không sửa code sinh tự động. Thay đổi không tương thích ngược phải được thống nhất trước khi merge.
+- **Schema:** không sửa migration đã phát hành; mọi thay đổi là migration mới `V<n>__<mo_ta>.sql`.
+- **Package:** đặt code vào đúng package theo [thiết kế](docs/thiet-ke.md#3-kiến-trúc).
+- **gRPC service:** chỉ cần là Spring bean kế thừa lớp `*ImplBase` sinh từ `.proto`; service được đăng ký tự động, không sửa `GrpcServerLifecycle`.
+- **Cấu hình:** không hardcode địa chỉ, cổng hay vai trò node; mọi giá trị lấy từ cấu hình.
+- **Logging:** dùng SLF4J, không dùng `System.out` trong server. Log replication có `seq` và `event_id`.
+- **Phiên bản thư viện:** chỉ khai báo trong `pom.xml`; thư viện có trong BOM không ghi version riêng. Không dùng Lombok.
+- **Quyết định kỹ thuật mới:** thêm vào [thiết kế, mục 7](docs/thiet-ke.md#7-quyết-định-kỹ-thuật) trong cùng Pull Request.
 
-| Nhánh | Vai trò | Nhận thay đổi từ |
-|---|---|---|
-| `main` | Phiên bản ổn định: luôn build, test và chạy được cụm 4 node. Dùng để demo và phát hành. | Pull Request từ `develop` |
-| `develop` | Nhánh tích hợp: nơi các thành phần được ghép và chạy cùng nhau; có thể tạm thời chưa ổn định. | Pull Request từ nhánh module |
-| `module/<ten-module>` | Nhánh làm việc của người phụ trách một module, tạo từ `develop`. `<ten-module>` là tên module hoặc package trong [docs/thiet-ke.md](docs/thiet-ke.md#2-kiến-trúc), trùng với scope của commit message. | Commit của người phụ trách module |
+## 4. Kiểm thử
 
-Chỉ có ba loại nhánh trên. Không tạo nhánh khác.
+| Loại | Tên lớp | Chạy bởi | Cơ sở dữ liệu |
+|---|---|---|---|
+| Unit test | `*Test` | Surefire, trong `mvnw verify` | Không dùng |
+| Integration test | `*IT`, kế thừa `AbstractNodeIT` | Failsafe, trong `mvnw verify` | Instance TEST (`localhost:5549`); CI dùng service `postgres:16` trên cùng cổng |
 
-Lý do tách `main` và `develop`: lỗi phát sinh khi ghép các thành phần nằm lại ở `develop`, không làm mất phiên bản đang chạy được; mỗi lần đưa `develop` lên `main` là một mốc rõ ràng, có thể quay lại; khi đóng băng chỉ cần ngừng merge vào `main`.
+`AbstractNodeIT` khởi động node thật (S1, PRIMARY, gRPC trên cổng ngẫu nhiên) và chạy Flyway `clean` + `migrate` mỗi Spring context; chi tiết trong Javadoc của lớp này, ví dụ mẫu là `NodeStatusIT`.
 
-Nhánh module tồn tại suốt dự án, nên phải tích hợp thường xuyên để tránh xung đột lớn khi ghép:
+- Mỗi test tự chuẩn bị và dọn dữ liệu của mình; không phụ thuộc thứ tự chạy.
+- Integration test không được kết nối tới cơ sở dữ liệu của S1..S4.
+- Chính sách trễ được test bằng đồng hồ mô phỏng, không dùng `sleep`.
+- Không mô phỏng split-brain bằng cách chỉ đổi cờ vai trò trong bộ nhớ; dừng node thật bằng `stop-local.ps1`, dừng cơ sở dữ liệu bằng `local-pg.ps1 stop`.
+- Test của một kịch bản nghiệm thu ghi mã kịch bản (`T01`…`T22`) trong Javadoc.
 
-- Cập nhật `develop` vào nhánh module trước khi bắt đầu một việc mới và trước khi mở Pull Request.
-- Mở Pull Request vào `develop` ngay khi xong một việc, không gom nhiều việc vào một Pull Request.
+| Chạy | Lệnh |
+|---|---|
+| Toàn bộ | `.\mvnw.cmd -B -ntp clean verify` |
+| Một unit test | `.\mvnw.cmd -pl node-server -am test "-Dtest=NodePropertiesTest" "-Dsurefire.failIfNoSpecifiedTests=false"` |
+| Một integration test | `.\mvnw.cmd -pl node-server -am verify "-Dit.test=NodeStatusIT" "-Dtest=none" "-Dsurefire.failIfNoSpecifiedTests=false"` |
+| Build nhanh `node-server`, bỏ qua test (đã `install` ít nhất một lần) | `.\mvnw.cmd -o -pl node-server package -DskipTests` |
 
-Đưa `develop` lên `main`:
+Trong PowerShell, tham số `-D` có dấu chấm phải đặt trong ngoặc kép. Khi chạy cục bộ mà instance TEST chưa bật, integration test bị bỏ qua kèm cảnh báo `INTEGRATION TESTS SKIPPED`; trên CI, trường hợp này làm build thất bại.
 
-- Maintainer mở Pull Request `develop` → `main` khi các kịch bản nghiệm thu của mốc đều đạt (xem [docs/kiem-thu.md](docs/kiem-thu.md)).
-- Merge bằng merge commit, không squash, để hai nhánh không lệch lịch sử.
-- Gắn tag `v0.<n>.0` lên commit merge.
-- Lỗi phát hiện trên `main` được sửa trên nhánh của module liên quan, merge vào `develop`, rồi đưa lên `main` như trên.
+## 5. Definition of Done
 
-Quy tắc chung:
-
-- Không push trực tiếp lên `main` hoặc `develop`. Mọi thay đổi đi qua Pull Request.
-- Pull Request được merge khi có ít nhất một approve và CI thành công. Thay đổi liên quan tới giao thức, schema hoặc quyền ghi của primary cần maintainer duyệt.
-- Mỗi Pull Request nên nhỏ và tập trung vào một mục đích, đồng thời liên kết tới issue tương ứng.
-- Commit message theo [Conventional Commits](https://www.conventionalcommits.org/), ví dụ `feat(replication): apply contiguous event batch`, `fix(node): fail fast when local database is down`.
-
-## Quy ước kỹ thuật
-
-- **Giao thức:** `contracts/src/main/proto/inventory.proto` là nguồn chuẩn duy nhất. Không chỉnh sửa code sinh tự động. Thay đổi không tương thích ngược phải được thống nhất trước khi merge.
-- **Schema:** không sửa migration đã phát hành. Mọi thay đổi schema được viết thành migration mới `V<n>__<mo_ta>.sql`.
-- **Cấu trúc package:** đặt code vào đúng package theo bảng trong [docs/thiet-ke.md](docs/thiet-ke.md#2-kiến-trúc).
-- **gRPC service:** một service mới chỉ cần là Spring bean kế thừa lớp `*ImplBase` sinh ra từ `.proto`. Service được đăng ký tự động, không sửa `GrpcServerLifecycle`.
-- **Cấu hình:** không hardcode địa chỉ, cổng hay vai trò node; mọi giá trị đều lấy từ cấu hình.
-- **Logging:** dùng SLF4J. Không dùng `System.out` trong server. Log liên quan tới replication phải có `seq` và `event_id`.
-- **Quyết định kiến trúc:** bổ sung vào [docs/thiet-ke.md](docs/thiet-ke.md#5-quyết-định-kiến-trúc).
-
-## Kiểm thử
-
-Unit test đặt tên `*Test`. Integration test đặt tên `*IT` và kế thừa `AbstractNodeIT`. Chi tiết xem [docs/kiem-thu.md](docs/kiem-thu.md).
-
-## Definition of Done
-
-- [ ] `mvnw verify` thành công, bao gồm integration test.
+- [ ] `mvnw verify` thành công, integration test không bị bỏ qua.
 - [ ] Có test cho trường hợp thành công, trùng lặp, lỗi mạng hoặc crash, và các bất biến dữ liệu liên quan.
 - [ ] Không có secret trong mã nguồn hoặc cấu hình được commit.
-- [ ] Tài liệu được cập nhật khi giao thức, schema hoặc hành vi vận hành thay đổi.
+- [ ] Tài liệu được cập nhật khi giao thức, schema hoặc cách vận hành thay đổi.
 - [ ] Đã chạy thử trên cụm cục bộ và được review.
