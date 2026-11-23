@@ -1,5 +1,8 @@
 /**
- * Replication policies per route: S1_TO_S2 immediate, S1_TO_S3 delay of n seconds, S2_TO_S4 batch of
- * n events; durable scheduling and versioned policy configuration (replication_policy table).
+ * Propagation policies: immediate (S2), delay of {@code delaySeconds} (S3) and batches of
+ * {@code batchSize} business events (S4); durable scheduling across restarts and policy changes
+ * at runtime, replicated as POLICY_CHANGE events. Routes are fixed per epoch at promote time.
+ *
+ * <p>Design: docs/thiet-ke.md, section 4.
  */
 package edu.inventory.node.policy;

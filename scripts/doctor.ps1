@@ -100,7 +100,7 @@ foreach ($id in $instances.Keys) {
 }
 
 # --- Build output -------------------------------------------------------------
-foreach ($jar in 'node-server\target\node-server-0.1.0-SNAPSHOT.jar', 'cli-client\target\cli-client-0.1.0-SNAPSHOT.jar') {
+foreach ($jar in 'node-server\target\node-server.jar', 'cli-client\target\cli-client.jar') {
     if (Test-Path (Join-Path $root $jar)) { Write-Check OK "built: $jar" }
     else { Write-Check WARN "not built yet: $jar" '.\mvnw.cmd -B -ntp clean install' }
 }

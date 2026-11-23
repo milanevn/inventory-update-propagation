@@ -36,4 +36,4 @@ jobs:
           java-version: '21'
           cache: maven
       - name: Build, unit tests and integration tests (Maven Wrapper, pinned Maven version)
-        run: chmod +x mvnw && ./mvnw -B -ntp verify
+        run: ./mvnw -B -ntp verify

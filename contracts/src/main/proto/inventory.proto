@@ -10,7 +10,7 @@ option java_multiple_files = true;
 // Implementation status: only NodeService.GetStatus is implemented. Every other
 // RPC is part of the contract but currently returns UNIMPLEMENTED.
 // Internal RPCs (ReplicationService, NodeService.UpdatePolicy) are NOT authenticated
-// yet; node authentication is planned (docs/thiet-ke.md, "Hạn chế đã biết").
+// yet; token authentication is planned (docs/thiet-ke.md, decision 7).
 service InventoryService {
   rpc ExecuteCommand (CommandRequest) returns (CommandReply);   // not implemented yet
   rpc GetInventory (InventoryQuery) returns (InventoryReply);   // not implemented yet

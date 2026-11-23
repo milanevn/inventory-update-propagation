@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-JAR="$ROOT/node-server/target/node-server-0.1.0-SNAPSHOT.jar"
+JAR="$ROOT/node-server/target/node-server.jar"
 if [[ ! -f "$JAR" ]]; then echo "Build first: ./mvnw -B -ntp clean install" >&2; exit 1; fi
 # Fast-start JVM settings for node processes (docs/thiet-ke.md, decision 8). Tests and CI keep JVM defaults.
 JVM_OPTS=(-XX:TieredStopAtLevel=1 -XX:+UseSerialGC -Xms64m -Xmx256m)

@@ -6,7 +6,7 @@
   Each instance has its own data directory, its own postgres server process and its own port:
   S1=5541, S2=5542, S3=5543, S4=5544, TEST=5549 (used only by *IT integration tests).
   Stopping one instance does not affect the others, which is required for node-specific
-  failure tests (see docs/kiem-thu.md T16).
+  failure tests (acceptance scenario T16).
 
   Requires PostgreSQL 16 server binaries (initdb, pg_ctl, psql). No admin rights and no
   Windows service are needed; the portable EDB "binaries" ZIP is enough.

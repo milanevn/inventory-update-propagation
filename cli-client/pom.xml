@@ -5,14 +5,13 @@
     <dependency><groupId>edu.inventory</groupId><artifactId>contracts</artifactId><version>${project.version}</version></dependency>
     <dependency><groupId>io.grpc</groupId><artifactId>grpc-netty-shaded</artifactId></dependency>
   </dependencies>
-  <build><plugins>
-    <!-- Executable jar: java -jar cli-client/target/cli-client-0.1.0-SNAPSHOT.jar localhost:9101 -->
+  <build>
+    <!-- Stable jar name for scripts and docs: java -jar cli-client/target/cli-client.jar localhost:9101 -->
+    <finalName>cli-client</finalName>
+    <plugins>
     <plugin><groupId>org.springframework.boot</groupId><artifactId>spring-boot-maven-plugin</artifactId><version>${spring-boot.version}</version>
       <configuration><mainClass>edu.inventory.cli.NodeStatusCli</mainClass></configuration>
       <executions><execution><goals><goal>repackage</goal></goals></execution></executions>
-    </plugin>
-    <plugin><groupId>org.codehaus.mojo</groupId><artifactId>exec-maven-plugin</artifactId>
-      <configuration><mainClass>edu.inventory.cli.NodeStatusCli</mainClass></configuration>
     </plugin>
   </plugins></build>
 </project>

@@ -23,7 +23,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
-$jar = Join-Path $root 'node-server\target\node-server-0.1.0-SNAPSHOT.jar'
+$jar = Join-Path $root 'node-server\target\node-server.jar'
 if (-not (Test-Path $jar)) { throw "Missing $jar. Build first: .\mvnw.cmd -B -ntp clean install" }
 $java = if ($env:JAVA_HOME) { Join-Path $env:JAVA_HOME 'bin\java.exe' } else { 'java' }
 # Fast-start JVM settings for node processes (docs/thiet-ke.md, decision 8). Tests and CI keep JVM defaults.

@@ -9,7 +9,7 @@ import io.grpc.StatusRuntimeException;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Run: java -jar cli-client/target/cli-client-0.1.0-SNAPSHOT.jar localhost:9101 [localhost:9102 ...]
+ * Run: java -jar cli-client/target/cli-client.jar localhost:9101 [localhost:9102 ...]
  * Exit code 0 only if every target answered.
  */
 public final class NodeStatusCli {

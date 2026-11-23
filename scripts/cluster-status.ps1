@@ -4,12 +4,12 @@
 
 .EXAMPLE
   .\scripts\cluster-status.ps1
-  .\scripts\cluster-status.ps1 192.168.1.12:9100 192.168.1.13:9100
+  .\scripts\cluster-status.ps1 192.168.1.12:9102 192.168.1.13:9103
 #>
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
-$jar = Join-Path $root 'cli-client\target\cli-client-0.1.0-SNAPSHOT.jar'
-if (-not (Test-Path $jar)) { throw "Missing $jar. Build first: mvn -B -ntp clean install" }
+$jar = Join-Path $root 'cli-client\target\cli-client.jar'
+if (-not (Test-Path $jar)) { throw "Missing $jar. Build first: .\mvnw.cmd -B -ntp clean install" }
 $java = if ($env:JAVA_HOME) { Join-Path $env:JAVA_HOME 'bin\java.exe' } else { 'java' }
 # @(...) matters: a single target must stay an array, otherwise splatting a string passes one char per argument.
 $targets = @(if ($args.Count -gt 0) { $args } else { 'localhost:9101', 'localhost:9102', 'localhost:9103', 'localhost:9104' })
