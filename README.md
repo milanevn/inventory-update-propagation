@@ -25,7 +25,7 @@ Thiết kế chi tiết: [docs/thiet-ke.md](docs/thiet-ke.md).
 
 - JDK 21
 - PostgreSQL 16 ([cách cài](docs/van-hanh.md#1-cài-đặt))
-- Windows 10/11 với PowerShell 5.1+, hoặc Linux/macOS với Bash
+- Windows 10/11 với PowerShell 5.1+
 
 Không cần cài Maven; repository có kèm Maven Wrapper.
 
@@ -51,8 +51,6 @@ localhost:9102 -> node=S2 role=REPLICA epoch=1 issued=0 applied=0 status=READY
 ```
 
 Dừng cụm: `.\scripts\stop-local.ps1`, rồi `.\scripts\local-pg.ps1 stop`.
-
-Trên Linux, macOS: tự chạy PostgreSQL (hoặc dùng Docker Compose trong `deploy/`), rồi dùng `./mvnw`, `scripts/run-local.sh`, `scripts/stop-local.sh`.
 
 ## Sử dụng
 
@@ -81,7 +79,6 @@ Integration test chạy trên PostgreSQL thật ở instance TEST (cổng 5549);
 | `node-server/` | Server dùng chung cho S1..S4: gRPC, nghiệp vụ, replication, phục hồi, migration Flyway |
 | `cli-client/` | Client dòng lệnh |
 | `scripts/` | Script quản lý PostgreSQL, chạy và dừng node, kiểm tra môi trường |
-| `deploy/` | Docker Compose cho PostgreSQL (tùy chọn) |
 
 ## Tài liệu
 

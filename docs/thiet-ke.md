@@ -19,7 +19,7 @@ Client thực hiện các thao tác quản lý sản phẩm, nhập kho, xuất 
 | FR-09 | Khi primary gặp sự cố, người vận hành dùng một lệnh promote để đưa node còn hoạt động có dữ liệu mới nhất lên làm primary. Không bao giờ có hai node cùng nhận ghi; các thao tác ghi bị mất được liệt kê. |
 | FR-10 | Cùng một mã nguồn chạy được 4 node trên một máy hoặc trên 4 máy vật lý. |
 
-**Ngoài phạm vi:** failover tự động, đồng thuận Raft/Paxos, nhiều node ghi, replication có sẵn của PostgreSQL, snapshot, sharding, message broker, Kubernetes, giao diện web hoặc JavaFX, TLS cho gRPC, đóng gói node bằng Docker.
+**Ngoài phạm vi:** failover tự động, đồng thuận Raft/Paxos, nhiều node ghi, replication có sẵn của PostgreSQL, snapshot, sharding, message broker, Kubernetes, giao diện web hoặc JavaFX, TLS cho gRPC, Docker, chạy cụm trên Linux hoặc macOS.
 
 **Cách hiểu đề bài:**
 
@@ -266,7 +266,7 @@ Quyết định mới được bổ sung vào bảng này qua Pull Request.
 | 6 | Phiên bản chỉ khai báo trong `pom.xml` và Maven Wrapper, thư viện có trong BOM không ghi version riêng; không nâng Spring Boot, gRPC, Protobuf trong dự án; không dùng Lombok; định dạng theo `.editorconfig` | Mọi máy và CI build cùng một bộ phiên bản |
 | 7 | Xác thực RPC nội bộ bằng token dùng chung, không mTLS | Không phải quản lý chứng chỉ, không đổi `.proto`. Token truyền plaintext nên chỉ triển khai trong LAN tin cậy |
 | 8 | JVM node do script khởi động dùng `-XX:TieredStopAtLevel=1 -XX:+UseSerialGC -Xms64m -Xmx256m`; test và CI giữ mặc định | Cụm khởi động nhanh gấp khoảng hai lần; hiệu năng đỉnh thấp hơn, không ảnh hưởng ở quy mô đồ án |
-| 9 | Client duy nhất là CLI; không làm JavaFX, TLS, đóng gói node bằng Docker. Docker chỉ là tùy chọn để chạy PostgreSQL | Dồn sức cho các kịch bản bắt buộc |
+| 9 | Client duy nhất là CLI; không làm JavaFX, TLS. Chỉ hỗ trợ Windows: script PowerShell, PostgreSQL cài trực tiếp, không dùng Docker | Dồn sức cho các kịch bản bắt buộc; cả nhóm dùng Windows nên chỉ bảo trì một bộ script. CI vẫn build trên Linux bằng Maven Wrapper |
 | 10 | Tuyến lan truyền xác định khi promote và cố định trong epoch; primary thấy epoch cao hơn thì tự hạ vai trò | Mọi node biết cùng một tuyến, không đổi qua lại. Nguồn của S4 sập thì S4 phải chờ |
 | 11 | Đổi chính sách và bắt đầu epoch là sự kiện hệ thống trong operation log, không tính vào n của lô S4 | Một cơ chế nhân bản cho cả dữ liệu và cấu hình; logic chia lô phải bỏ qua sự kiện hệ thống |
 | 12 | ACK cộng dồn theo `last_applied_seq`; `replication_progress` là nguồn sự thật | Mất một ACK không gây gửi lại kéo dài; outbox phải cập nhật cùng transaction |
