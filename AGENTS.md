@@ -29,7 +29,7 @@ Hệ thống quản lý kho phân tán gồm 4 node S1..S4, replication tự xâ
 
 1. **Thiết kế là chuẩn.** Hành vi phải khớp `docs/thiet-ke.md`. Không tự đổi quyết định đã chốt (mục 7). Thấy yêu cầu mâu thuẫn với thiết kế thì dừng lại và hỏi người dùng. Đổi hành vi, giao thức hoặc schema thì cập nhật `docs/thiet-ke.md` trong cùng thay đổi.
 2. **Một node ghi.** Chỉ primary nhận lệnh ghi; replica từ chối bằng `FAILED_PRECONDITION`. Không thêm cơ chế failover tự động.
-3. **Ghi nguyên tử.** Dữ liệu nghiệp vụ, `operation_log`, outbox và `processed_requests` ghi trong cùng một transaction. Trạng thái bền phải nằm trong PostgreSQL, không dựa vào shutdown hook (`stop-local.ps1` tương đương crash).
+3. **Ghi nguyên tử.** Dữ liệu nghiệp vụ, `operation_log` và `processed_requests` ghi trong cùng một transaction. Không có outbox: `operation_log` là hàng chờ gửi, mỗi đích chỉ có một con trỏ trong `replication_progress` (thiết kế, quyết định 17). Trạng thái bền phải nằm trong PostgreSQL, không dựa vào shutdown hook (`stop-local.ps1` tương đương crash).
 4. **Hợp đồng.** `contracts/src/main/proto/inventory.proto` là nguồn chuẩn; không sửa code sinh tự động. Thay đổi không tương thích ngược phải hỏi người dùng trước.
 5. **Schema.** Không sửa migration đã phát hành; mọi thay đổi là migration mới `V<n>__<mo_ta>.sql`.
 6. **Phạm vi.** Chỉ sửa module, package của việc đang làm. Không refactor rộng. Không thêm thư viện, plugin hay công cụ mới khi chưa được đồng ý. Thư viện có trong BOM của Spring Boot hoặc gRPC không ghi version riêng. Không dùng Lombok.
