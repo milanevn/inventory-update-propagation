@@ -54,7 +54,7 @@ Dừng cụm: `.\scripts\stop-local.ps1`, rồi `.\scripts\local-pg.ps1 stop`.
 
 ## Sử dụng
 
-S1..S4 lắng nghe gRPC trên cổng 9101..9104; S1 là primary mặc định. Client dòng lệnh gọi trực tiếp tới một hoặc nhiều node:
+S1..S4 lắng nghe gRPC trên cổng 9101..9104; S1 là primary mặc định. Client dòng lệnh in trạng thái (`GetStatus`) của từng node được chỉ định:
 
 ```powershell
 java -jar cli-client/target/cli-client.jar localhost:9101 localhost:9102

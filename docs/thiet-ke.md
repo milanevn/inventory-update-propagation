@@ -118,7 +118,7 @@ Một lệnh ghi đi qua hệ thống như sau:
 |---|---|---|
 | Ngay lập tức | S2 | Gửi ngay sau commit, theo lô nhỏ có `seq` liên tục. |
 | Trễ n giây | S3 | Outbox có `eligible_at = thời điểm commit + n`; chỉ gửi khi `now >= eligible_at`. Sau khi khởi động lại, các sự kiện chưa có lịch được lập lịch bổ sung. |
-| Theo lô n | S4 | Mỗi lô gồm đúng n sự kiện nghiệp vụ liên tục, bắt đầu ngay sau lô trước và kết thúc tại sự kiện nghiệp vụ thứ n; sự kiện hệ thống nằm trong khoảng đó đi cùng lô. Cả lô được gửi trong một lần gọi `ApplyEvents` và S4 áp dụng cả lô trong một transaction, nên S4 không bao giờ ở trạng thái nửa lô. Không xả lô theo thời gian. Lô lỗi giữ nguyên thành viên khi retry. S4 bắt kịp hoặc replay cũng chỉ đến hết lô đầy đủ cuối cùng; phần lẻ tiếp tục chờ. |
+| Theo lô n | S4 | Mỗi lô gồm đúng n sự kiện nghiệp vụ liên tục, bắt đầu ngay sau lô trước và kết thúc tại sự kiện nghiệp vụ thứ n; sự kiện hệ thống nằm trong khoảng đó đi cùng lô. n là `batchSize` có hiệu lực tại sự kiện nghiệp vụ đầu tiên của lô; `POLICY_CHANGE` nằm giữa một lô đang gom chỉ áp dụng từ lô sau. Cả lô được gửi trong một lần gọi `ApplyEvents` và S4 áp dụng cả lô trong một transaction, nên S4 không bao giờ ở trạng thái nửa lô. Không xả lô theo thời gian. Lô lỗi giữ nguyên thành viên khi retry. S4 bắt kịp hoặc replay cũng chỉ đến hết lô đầy đủ cuối cùng; phần lẻ tiếp tục chờ. |
 
 `UpdatePolicy` được gửi tới primary và tạo sự kiện `POLICY_CHANGE`, nên mọi node có cùng cấu hình. Giá trị hợp lệ: `delaySeconds` 0..3600, `batchSize` 1..100; ngoài khoảng trả `INVALID_ARGUMENT`. Giá trị mới chỉ áp dụng cho sự kiện mới (tuyến S3) và từ lô kế tiếp (tuyến S4).
 
@@ -236,11 +236,19 @@ Phải chọn node mới nhất vì chỉ node đó giữ được nhiều lịc
 
 | Tình huống | Phát hiện | Phục hồi |
 |---|---|---|
-| Mất cơ sở dữ liệu của replica | Node khởi động với `last_applied_seq = 0`, giống một node mới | Tạo cơ sở dữ liệu mới, replay toàn bộ operation log từ primary qua `FetchEvents` |
+| Mất cơ sở dữ liệu của replica | Node khởi động với `last_applied_seq = 0`, giống một node mới | Tạo cơ sở dữ liệu mới (Flyway), rồi replay toàn bộ operation log từ primary qua `FetchEvents` theo các bước bên dưới |
 | Dữ liệu replica bị sửa sai | Kiểm tra bất biến khi khởi động và mỗi 30 giây: tồn kho = tổng nhập − tổng xuất, và không âm | Cách ly node, xóa dữ liệu, replay toàn bộ log, kiểm tra lại |
 | Crash hoặc mất mạng | Bên nhận trả `GAP_DETECTED` hoặc nguồn chưa nhận được ACK | Nguồn gửi lại từ `last_applied_seq + 1` |
 
 Riêng S4, replay chỉ đến hết lô đầy đủ cuối cùng; phần lẻ tiếp tục chờ theo chính sách lô.
+
+**Kích hoạt và tiếp tục replay:**
+
+1. Replica khởi động với `last_applied_seq = 0` chuyển sang `RESTORING`, hỏi `GetStatus` các peer cho tới khi tìm được primary, rồi replay qua `FetchEvents`. Primary có `last_issued_seq = 0` thì không có gì để replay và node về `READY` ngay. Primary không tự replay.
+2. Bắt đầu phục hồi (cả khi bị cách ly): xóa dữ liệu nghiệp vụ, đặt `last_applied_seq = 0` và `status = RESTORING` trong cùng một transaction.
+3. Mỗi lô `FetchEvents` được áp dụng như tại replica (mục 4): theo thứ tự `seq`, trong transaction, tăng `last_applied_seq`.
+4. Replay bị gián đoạn (crash, mất kết nối tới primary): node khởi động lại vẫn ở `RESTORING` và tiếp tục từ `last_applied_seq + 1`. Dữ liệu đã replay là một tiền tố hợp lệ của lịch sử nên không cần xóa lại.
+5. Replay xong và kiểm tra bất biến đạt thì về `READY`; từ đó nguồn gửi tiếp như bình thường.
 
 **Trạng thái node:**
 
@@ -248,7 +256,7 @@ Riêng S4, replay chỉ đến hết lô đầy đủ cuối cùng; phần lẻ 
 |---|---|---|---|
 | `READY` | Hoạt động bình thường | Có (dữ liệu có thể chưa mới nhất) | Có |
 | `QUARANTINED` | Kiểm tra bất biến thất bại, hoặc nhận `CONFLICT` | Không (`UNAVAILABLE`) | Không |
-| `RESTORING` | Đang xóa dữ liệu và replay | Không (`UNAVAILABLE`) | Không |
+| `RESTORING` | Đang xóa dữ liệu và replay; lưu bền trong `node_state` | Không (`UNAVAILABLE`) | Không |
 
 Chuyển trạng thái: `READY → QUARANTINED → RESTORING → READY`. Node chỉ về `READY` khi replay xong và kiểm tra bất biến đạt; thất bại thì quay lại `QUARANTINED`. `GetStatus` luôn trả lời ở mọi trạng thái để người vận hành và CLI biết trạng thái node.
 
@@ -273,6 +281,7 @@ Quyết định mới được bổ sung vào bảng này qua Pull Request.
 | 13 | Kiểm tra epoch theo bên gửi (`EventBatch.epoch`), không theo từng sự kiện | Replica nhận đủ lịch sử trước promote từ nguồn mới; primary cũ bị chặn ngay ở mức lô |
 | 14 | Lấy bù do bên gửi chủ động: gửi lại từ `last_applied_seq + 1` mà bên nhận báo; nguồn mới hỏi `GetStatus` để biết bắt đầu từ đâu; `FetchEvents` chỉ dùng để replay khi phục hồi | Một cơ chế lấy bù duy nhất. Outbox phải giữ sự kiện cho tới khi được ACK |
 | 15 | Lô S4 gửi nguyên lô trong một lần gọi `ApplyEvents` và áp dụng trong một transaction; giới hạn 100 sự kiện mỗi lần gọi chỉ áp dụng cho tuyến S2, S3 | S4 không bao giờ ở trạng thái nửa lô, retry đơn giản. Một lần gọi có thể vượt 100 sự kiện khi có sự kiện hệ thống xen giữa; sự kiện nhỏ nên không đáng kể |
+| 16 | Replica có `last_applied_seq = 0` tự replay trước khi `READY`; `RESTORING` lưu bền, replay bị gián đoạn tiếp tục từ `last_applied_seq + 1` | Node mất dữ liệu không bị kẹt chờ nguồn (nguồn không gửi lại phần đã ACK). Replay nhiều lần không trùng vì áp dụng theo `seq` trong transaction. Node chờ ở `RESTORING` khi chưa liên lạc được primary |
 
 ## 8. Hạn chế đã biết
 
