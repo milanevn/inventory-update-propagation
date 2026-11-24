@@ -11,20 +11,23 @@
 
 | Nhánh | Vai trò |
 |---|---|
-| `main` | Phiên bản ổn định: luôn build, test và chạy được cụm 4 node. Chỉ nhận Pull Request từ `develop`. |
-| `develop` | Nhánh tích hợp: nơi các phần được ghép và chạy cùng nhau. Nhận Pull Request từ các nhánh `feature/*`. |
-| `feature/<module>-<mo-ta-ngan>` | Mỗi việc một nhánh, tạo từ `develop`, xóa sau khi merge. Ví dụ: `feature/contracts-v2`, `feature/replication-apply-events`, `feature/policy-delay-s3`. |
+| `main` | Nhánh duy nhất lâu dài: luôn build, test và chạy được cụm 4 node. Chỉ nhận Pull Request từ các nhánh `feature/*`. |
+| `feature/<module>-<mo-ta-ngan>` | Mỗi việc một nhánh, tạo từ `main`, xóa sau khi merge. Ví dụ: `feature/contracts-v2`, `feature/replication-apply-events`, `feature/policy-delay-s3`. |
 
 `<module>` là tên module hoặc package trong [thiết kế](docs/thiet-ke.md#3-kiến-trúc) (`inventory`, `replication`, `policy`, `recovery`, `contracts`, `cli`...), hoặc `docs`, `scripts`. Sửa lỗi cũng dùng nhánh `feature/*`. Không tạo loại nhánh khác.
 
-Tách `main` và `develop` để lỗi phát sinh khi ghép các phần nằm lại ở `develop`, không làm hỏng phiên bản đang chạy được; mỗi lần đưa `develop` lên `main` là một mốc có thể quay lại.
+```powershell
+git switch main; git pull
+git switch -c feature/replication-apply-events
+```
 
-- Không push trực tiếp lên `main` hoặc `develop`; mọi thay đổi đi qua Pull Request.
-- Trước khi mở Pull Request: cập nhật `develop` mới nhất vào nhánh của mình và chạy `mvnw verify`.
-- Pull Request nhỏ, một mục đích, ghi rõ mã công việc và kịch bản nghiệm thu liên quan.
+- Không push trực tiếp lên `main`; mọi thay đổi đi qua Pull Request.
+- Trước khi mở Pull Request: cập nhật `main` mới nhất vào nhánh của mình (`git pull origin main`) và chạy `mvnw verify`.
+- Pull Request nhỏ, một mục đích, ghi rõ mã công việc và kịch bản nghiệm thu liên quan. Nhánh sống ngắn; việc lớn thì chia thành nhiều Pull Request.
 - Merge khi có ít nhất một approve và CI xanh. Thay đổi giao thức, schema hoặc quyền ghi của primary cần maintainer duyệt.
-- Đưa `develop` lên `main`: maintainer mở Pull Request khi các kịch bản nghiệm thu của mốc đều đạt, merge bằng merge commit (không squash) và gắn tag `v0.<n>.0`.
-- Commit message theo [Conventional Commits](https://www.conventionalcommits.org/), scope là tên module, ví dụ `feat(replication): apply contiguous event batch`, `fix(inventory): reject stock out below zero`.
+- Merge bằng *Squash and merge*: mỗi Pull Request thành một commit trên `main`, tiêu đề Pull Request là commit message.
+- Khi các kịch bản nghiệm thu của một mốc đều đạt, maintainer gắn tag `v0.<n>.0` trên `main`; tag là mốc có thể quay lại.
+- Commit message và tiêu đề Pull Request theo [Conventional Commits](https://www.conventionalcommits.org/), scope là tên module, ví dụ `feat(replication): apply contiguous event batch`, `fix(inventory): reject stock out below zero`.
 
 ## 3. Quy ước code
 

@@ -35,7 +35,7 @@ Hệ thống quản lý kho phân tán gồm 4 node S1..S4, replication tự xâ
 5. **Schema.** Không sửa migration đã phát hành; mọi thay đổi là migration mới `V<n>__<mo_ta>.sql`.
 6. **Phạm vi.** Chỉ sửa module, package của việc đang làm. Không refactor rộng. Không thêm thư viện, plugin hay công cụ mới khi chưa được đồng ý. Thư viện có trong BOM của Spring Boot hoặc gRPC không ghi version riêng. Không dùng Lombok.
 7. **Cấu hình.** Không hardcode cổng, địa chỉ, vai trò node; đọc từ `application.yml` và biến môi trường. Thêm biến môi trường thì cập nhật bảng cấu hình trong `docs/van-hanh.md`.
-8. **Không tự thao tác ra bên ngoài.** Không `git push`, merge, tạo Pull Request, đổi cài đặt GitHub, hay xóa dữ liệu PostgreSQL (`local-pg.ps1 reset` / `destroy`) khi chưa được người dùng đồng ý. Không commit thẳng lên `main` hoặc `develop`.
+8. **Không tự thao tác ra bên ngoài.** Không `git push`, merge, tạo Pull Request, đổi cài đặt GitHub, hay xóa dữ liệu PostgreSQL (`local-pg.ps1 reset` / `destroy`) khi chưa được người dùng đồng ý. Không commit thẳng lên `main`.
 9. **Không ghi thông tin nhạy cảm.** Không đưa bí mật, đường dẫn máy cá nhân, tên hay thông tin cá nhân của thành viên vào repo.
 10. **Tài liệu gọn.** Chỉ có `README.md`, `CONTRIBUTING.md`, `AGENTS.md`, `docs/thiet-ke.md`, `docs/van-hanh.md`; không tạo file tài liệu mới. Không mô tả tính năng chưa chạy như đã chạy.
 
@@ -45,7 +45,7 @@ Hệ thống quản lý kho phân tán gồm 4 node S1..S4, replication tự xâ
 - gRPC service mới: Spring bean kế thừa lớp `*ImplBase` sinh từ `.proto`; được đăng ký tự động, không sửa `GrpcServerLifecycle`.
 - Mỗi package tự quản lý repository JDBC của mình; lớp trong `grpc` không chứa SQL hay quy tắc nghiệp vụ.
 - Test: unit test `*Test`; integration test `*IT` kế thừa `AbstractNodeIT`. Mỗi test tự dọn dữ liệu, không phụ thuộc thứ tự. Chính sách trễ test bằng đồng hồ mô phỏng, không `sleep`. Test của kịch bản nghiệm thu ghi mã `Txx` trong Javadoc.
-- Nhánh `feature/<module>-<mo-ta-ngan>` tạo từ `develop`. Commit theo Conventional Commits, scope là tên module, ví dụ `feat(replication): apply contiguous event batch`.
+- Nhánh `feature/<module>-<mo-ta-ngan>` tạo từ `main`. Commit theo Conventional Commits, scope là tên module, ví dụ `feat(replication): apply contiguous event batch`.
 
 ## Lệnh thường dùng
 
