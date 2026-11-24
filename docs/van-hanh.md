@@ -33,8 +33,6 @@ Lần chạy đầu tiên: xem [Bắt đầu nhanh](../README.md#bắt-đầu-nh
 
 Dữ liệu PostgreSQL nằm ở `%LOCALAPPDATA%\inventory-replication\pg`.
 
-**Docker (tùy chọn).** `docker compose -f deploy/docker-compose.yml up -d` tạo PostgreSQL cho S1..S4 và TEST trên cùng các cổng, thay cho `local-pg.ps1`. Khi dừng, dùng `down` không kèm `-v` để giữ dữ liệu.
-
 ## 3. Cấu hình
 
 | Node | Vai trò mặc định | Cổng gRPC | Cổng PostgreSQL |
@@ -68,7 +66,6 @@ Biến môi trường của node (mặc định trong `node-server/src/main/reso
 | `stop-local.ps1 [-Node Sx]` | Dừng node. Trên Windows tương đương crash: shutdown hook không chạy |
 | `run-node.ps1 -Id Sx` | Chạy một node ở foreground (dùng khi triển khai nhiều máy); `Ctrl+C` để dừng có kiểm soát |
 | `cluster-status.ps1 [host:port …]` | Gọi `GetStatus`; mặc định hỏi 4 node cục bộ |
-| `run-local.sh`, `stop-local.sh` | Bản rút gọn cho Linux, macOS, Git Bash: không chờ `READY`, không kiểm tra PID, không quản lý PostgreSQL |
 
 Các script chạy node đặt sẵn tùy chọn JVM khởi động nhanh (quyết định 8 trong [thiet-ke.md](thiet-ke.md#7-quyết-định-kỹ-thuật)).
 
@@ -128,7 +125,7 @@ Gửi yêu cầu đổi chính sách tới primary; giá trị mới áp dụng 
 | `clean` không xóa được file `.jar` | Node đang dùng file jar; chạy `stop-local.ps1` trước khi build. |
 | Node dừng ngay, log có `Connection to localhost:554x refused` | PostgreSQL của node chưa chạy: `local-pg.ps1 status`, rồi `start`. |
 | `FlywayValidateException`, `checksum mismatch` hoặc `Detected applied migration not resolved locally` | Database cục bộ chứa migration từ nhánh khác: làm theo dòng "Xóa dữ liệu và bắt đầu lại" ở mục 2. |
-| Node dừng, log có `OutOfMemoryError: Java heap space` | Script giới hạn heap ở `-Xmx256m`. Tăng giá trị trong `run-local.ps1`, `run-node.ps1`, `run-local.sh` và cập nhật quyết định 8. |
+| Node dừng, log có `OutOfMemoryError: Java heap space` | Script giới hạn heap ở `-Xmx256m`. Tăng giá trị trong `run-local.ps1`, `run-node.ps1` và cập nhật quyết định 8. |
 | `Cannot bind gRPC port 910x` | Cổng đã bị chiếm; `doctor.ps1` chỉ ra tiến trình đang giữ cổng. |
 | Log build có `INTEGRATION TESTS SKIPPED` | Instance TEST chưa chạy: `.\scripts\local-pg.ps1 start -Node TEST`. |
 | Cảnh báo `flyway-community-db-support … 401` hoặc `Mockito is currently self-attaching` | Không ảnh hưởng; bỏ qua. |

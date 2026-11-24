@@ -13,7 +13,7 @@ Hệ thống quản lý kho phân tán gồm 4 node S1..S4, replication tự xâ
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Nhánh, Pull Request, quy ước code, viết và chạy test, Definition of Done |
 
 - Trả lời người dùng và viết tài liệu bằng **tiếng Việt**. Code, tên biến, commit message, `.proto`, SQL và script viết bằng tiếng Anh. File `.ps1` chỉ dùng ký tự ASCII.
-- Môi trường chính: Windows, PowerShell 5.1+, JDK 21, PostgreSQL 16 cài trực tiếp; Docker không bắt buộc.
+- Môi trường chính: Windows, PowerShell 5.1+, JDK 21, PostgreSQL 16 cài trực tiếp; không dùng Docker.
 
 ## Cấu trúc repo
 
@@ -24,7 +24,6 @@ Hệ thống quản lý kho phân tán gồm 4 node S1..S4, replication tự xâ
 | `node-server/` | Server của S1..S4; package `config`, `grpc`, `inventory`, `replication`, `policy`, `recovery`; migration Flyway trong `src/main/resources/db/migration` |
 | `cli-client/` | Client dòng lệnh |
 | `scripts/` | Quản lý PostgreSQL cục bộ, chạy và dừng node, kiểm tra môi trường |
-| `deploy/` | Docker Compose cho PostgreSQL (tùy chọn, chưa kiểm thử) |
 
 ## Quy tắc bắt buộc
 

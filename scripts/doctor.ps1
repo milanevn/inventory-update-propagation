@@ -91,8 +91,7 @@ foreach ($id in $instances.Keys) {
     $port = $instances[$id]
     if ($listeners.ContainsKey($port)) {
         $label = Get-ProcLabel $listeners[$port]
-        # Docker Desktop publishes container ports through its own proxy processes.
-        if ($label -match 'postgres|docker|wslrelay|vpnkit') { Write-Check OK "port $port ($id) served by $label" }
+        if ($label -match 'postgres') { Write-Check OK "port $port ($id) served by $label" }
         else { Write-Check FAIL "port $port ($id) is taken by $label" 'Stop that program; the project PostgreSQL needs this port' }
     } else {
         Write-Check WARN "port $port ($id): PostgreSQL not running" ".\scripts\local-pg.ps1 start$(if ($id -eq 'TEST') { ' -Node TEST' })"
