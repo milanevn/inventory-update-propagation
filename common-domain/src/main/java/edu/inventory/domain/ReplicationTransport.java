@@ -6,7 +6,8 @@ import java.util.List;
 public interface ReplicationTransport {
 
     /**
-     * Sends 1..100 contiguous events in ascending seq.
+     * Sends contiguous events in ascending seq: 1..100 events on the S2/S3 routes, exactly one
+     * batch on the S4 route (may exceed 100 when system events fall inside it).
      *
      * @param senderEpoch the sender's current epoch; the receiver checks it, not each event's epoch
      */

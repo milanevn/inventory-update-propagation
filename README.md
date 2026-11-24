@@ -16,7 +16,7 @@ Client ──gRPC──> S1 PRIMARY ──ngay lập tức──> S2 REPLICA ─
 - **Một node ghi.** Chỉ primary nhận lệnh nhập, xuất kho; dữ liệu, operation log và outbox được ghi trong cùng một transaction. Mọi node đều phục vụ đọc.
 - **Ba chính sách lan truyền:** S2 nhận ngay sau commit, S3 nhận sau tối thiểu n giây, S4 nhận theo lô đủ n cập nhật. Hai tham số đổi được khi hệ thống đang chạy.
 - **Giao nhận an toàn khi có lỗi:** at-least-once kết hợp áp dụng idempotent, sắp thứ tự theo `(epoch, seq)`, phát hiện trùng và thiếu sự kiện, tự lấy bù.
-- **Thay thế primary có kiểm soát:** lệnh `promote` đưa node có dữ liệu mới nhất lên làm primary; fencing bằng epoch bảo đảm không bao giờ có hai node cùng nhận ghi.
+- **Thay thế primary có kiểm soát:** lệnh `promote` đưa node có dữ liệu mới nhất lên làm primary; fencing bằng epoch bảo đảm chỉ lịch sử của primary mới được giữ lại, ghi mà primary cũ nhận khi bị cô lập được liệt kê là đã mất.
 - **Phục hồi bằng replay:** node có dữ liệu hỏng được dựng lại từ operation log.
 
 Thiết kế chi tiết: [docs/thiet-ke.md](docs/thiet-ke.md).

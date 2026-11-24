@@ -125,7 +125,9 @@ message ReplicationEvent {
 message EventBatch {
   string source_node_id = 1;
   string destination_node_id = 2;
-  repeated ReplicationEvent events = 3; // 1..100 events, contiguous, ascending seq
+  // Contiguous, ascending seq. S2/S3 routes: 1..100 events. S4 route: exactly one batch
+  // (may exceed 100 when system events fall inside it), applied in one transaction.
+  repeated ReplicationEvent events = 3;
   int64 epoch = 4; // sender's current epoch; the receiver checks this, not each event (decision 13)
 }
 enum ApplyCode {
