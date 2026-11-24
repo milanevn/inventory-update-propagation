@@ -1,6 +1,6 @@
 ## Mô tả
 
-<!-- Thay đổi gì và vì sao. Mã công việc liên quan, ví dụ TV2-01. -->
+<!-- Thay đổi gì và vì sao. Mã công việc liên quan. -->
 
 Kịch bản nghiệm thu liên quan: T…
 
