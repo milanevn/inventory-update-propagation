@@ -16,7 +16,7 @@ Client thực hiện các thao tác quản lý sản phẩm, nhập kho, xuất 
 | FR-06 | `delaySeconds` và `batchSize` là hai tham số độc lập, đổi được khi đang chạy. |
 | FR-07 | Mỗi replica phục vụ truy vấn đọc, kèm node ID và vị trí đã áp dụng; dữ liệu có thể chưa mới nhất. |
 | FR-08 | Có retry, chống trùng, phát hiện thiếu sự kiện (gap), lấy bù và phục hồi dữ liệu. |
-| FR-09 | Khi primary gặp sự cố, người vận hành dùng một lệnh promote để đưa node còn hoạt động có dữ liệu mới nhất lên làm primary. Không bao giờ có hai node cùng nhận ghi; các thao tác ghi bị mất được liệt kê. |
+| FR-09 | Khi primary gặp sự cố, người vận hành dùng một lệnh promote để đưa node còn hoạt động có dữ liệu mới nhất lên làm primary. Mỗi epoch chỉ có một primary và chỉ lịch sử của epoch mới nhất được giữ lại: replica từ chối sự kiện của epoch cũ; ghi mà primary cũ nhận khi bị cô lập bị loại bỏ và được liệt kê là đã mất. |
 | FR-10 | Cùng một mã nguồn chạy được 4 node trên một máy hoặc trên 4 máy vật lý. |
 
 **Ngoài phạm vi:** failover tự động, đồng thuận Raft/Paxos, nhiều node ghi, replication có sẵn của PostgreSQL, snapshot, sharding, message broker, Kubernetes, giao diện web hoặc JavaFX, TLS cho gRPC, Docker, chạy cụm trên Linux hoặc macOS.
@@ -118,9 +118,9 @@ Một lệnh ghi đi qua hệ thống như sau:
 |---|---|---|
 | Ngay lập tức | S2 | Gửi ngay sau commit, theo lô nhỏ có `seq` liên tục. |
 | Trễ n giây | S3 | Outbox có `eligible_at = thời điểm commit + n`; chỉ gửi khi `now >= eligible_at`. Sau khi khởi động lại, các sự kiện chưa có lịch được lập lịch bổ sung. |
-| Theo lô n | S4 | Mỗi lô gồm đúng n sự kiện nghiệp vụ liên tục, bắt đầu ngay sau lô trước và kết thúc tại sự kiện nghiệp vụ thứ n; sự kiện hệ thống nằm trong khoảng đó đi cùng lô. Không xả lô theo thời gian. Lô lỗi giữ nguyên thành viên khi retry. S4 bắt kịp hoặc replay cũng chỉ đến hết lô đầy đủ cuối cùng; phần lẻ tiếp tục chờ. |
+| Theo lô n | S4 | Mỗi lô gồm đúng n sự kiện nghiệp vụ liên tục, bắt đầu ngay sau lô trước và kết thúc tại sự kiện nghiệp vụ thứ n; sự kiện hệ thống nằm trong khoảng đó đi cùng lô. Cả lô được gửi trong một lần gọi `ApplyEvents` và S4 áp dụng cả lô trong một transaction, nên S4 không bao giờ ở trạng thái nửa lô. Không xả lô theo thời gian. Lô lỗi giữ nguyên thành viên khi retry. S4 bắt kịp hoặc replay cũng chỉ đến hết lô đầy đủ cuối cùng; phần lẻ tiếp tục chờ. |
 
-`UpdatePolicy` được gửi tới primary và tạo sự kiện `POLICY_CHANGE`, nên mọi node có cùng cấu hình. Giá trị hợp lệ: `delaySeconds` 0..3600, `batchSize` 1..100 (để một lô luôn vừa một lần gọi `ApplyEvents`); ngoài khoảng trả `INVALID_ARGUMENT`. Giá trị mới chỉ áp dụng cho sự kiện mới (tuyến S3) và từ lô kế tiếp (tuyến S4).
+`UpdatePolicy` được gửi tới primary và tạo sự kiện `POLICY_CHANGE`, nên mọi node có cùng cấu hình. Giá trị hợp lệ: `delaySeconds` 0..3600, `batchSize` 1..100; ngoài khoảng trả `INVALID_ARGUMENT`. Giá trị mới chỉ áp dụng cho sự kiện mới (tuyến S3) và từ lô kế tiếp (tuyến S4).
 
 **Tuyến lan truyền:**
 
@@ -154,7 +154,7 @@ Replica chuyển tiếp nguyên vẹn `event_id` và `(epoch, seq)` gốc. Mọi
 ### Giao nhận và retry
 
 - At-least-once kết hợp áp dụng idempotent; không có exactly-once. `event_id` giữ nguyên qua mọi lần retry; thứ tự áp dụng là thứ tự `seq`, không theo timestamp.
-- Worker gửi được đánh thức bằng tín hiệu trong JVM sau mỗi commit, kèm polling dự phòng mỗi 500 ms. Mỗi lần gọi `ApplyEvents` gửi tối đa 100 sự kiện liên tục.
+- Worker gửi được đánh thức bằng tín hiệu trong JVM sau mỗi commit, kèm polling dự phòng mỗi 500 ms. Tuyến S2, S3: mỗi lần gọi `ApplyEvents` gửi tối đa 100 sự kiện liên tục. Tuyến S4: mỗi lần gọi là đúng một lô; khi có sự kiện hệ thống xen giữa, lô có thể vượt 100 sự kiện.
 - Chỉ `APPLIED` hoặc `DUPLICATE` mới là ACK; gRPC `OK` không đồng nghĩa với đã áp dụng. ACK cộng dồn: cập nhật `replication_progress.last_acked_seq` và đánh dấu outbox `ACKED` trong cùng transaction.
 - Khi timeout hoặc `UNAVAILABLE`: không đánh dấu ACK, retry với exponential backoff (bắt đầu 500 ms, nhân đôi, tối đa 30 giây, jitter ±20%). Trạng thái retry lưu trong cơ sở dữ liệu.
 - **Lấy bù do bên gửi chủ động.** Nhận `GAP_DETECTED` thì bên gửi gửi lại từ `last_applied_seq + 1` mà bên nhận báo; outbox giữ sự kiện cho tới khi được ACK nên luôn còn dữ liệu để gửi lại. Replica khởi động lại cũng được bắt kịp theo cách này, không tự kéo. Nếu bên nhận báo tiến độ thấp hơn phần đã ACK (bên nhận mất dữ liệu), không gửi lại mà để node đó phục hồi bằng replay (mục 6). `FetchEvents` chỉ dùng để replay toàn bộ khi phục hồi.
@@ -163,13 +163,13 @@ Replica chuyển tiếp nguyên vẹn `event_id` và `(epoch, seq)` gốc. Mọi
 
 ## 5. Giao thức
 
-Nguồn chuẩn: [`inventory.proto`](../contracts/src/main/proto/inventory.proto), package `inventory.v1`. Các trường không còn dùng (`event_hash`, `snapshot_required`, `CommandRequest.voucher_no`) được đánh dấu `reserved`.
+Nguồn chuẩn: [`inventory.proto`](../contracts/src/main/proto/inventory.proto), package `inventory.v1`. Các trường không còn dùng (`event_hash`, `snapshot_required`, `CommandRequest.voucher_no`, `PolicyUpdateRequest.route_id`) được đánh dấu `reserved`. Hợp đồng hiện tại là bản v2 nhưng vẫn giữ package `inventory.v1`: chưa có client nào ngoài repo, nên trường bị bỏ được `reserved` thay vì đổi tên package.
 
 | Service | RPC | Mục đích | Cần token |
 |---|---|---|---|
 | `InventoryService` | `ExecuteCommand` | Tạo sản phẩm, nhập, xuất; chỉ primary nhận | Không |
 | | `GetInventory`, `ListInventory` | Tồn kho một sản phẩm hoặc toàn bộ, ở mọi node, kèm `node_id`, `epoch`, `last_applied_seq` | Không |
-| `ReplicationService` | `ApplyEvents` | Gửi tối đa 100 sự kiện liên tục kèm epoch của bên gửi; trả `ApplyCode` và `last_applied_seq` | Có |
+| `ReplicationService` | `ApplyEvents` | Gửi các sự kiện liên tục (tối đa 100; tuyến S4 là nguyên một lô) kèm epoch của bên gửi; trả `ApplyCode` và `last_applied_seq` | Có |
 | | `FetchEvents` | Lấy các sự kiện sau `after_seq`, `limit` 1..500; dùng khi replay để phục hồi | Có |
 | `NodeService` | `GetStatus` | Vai trò, epoch, tiến độ, trạng thái node | Không |
 | | `UpdatePolicy` | Đổi `delaySeconds` hoặc `batchSize`; tạo `POLICY_CHANGE` | Có |
@@ -184,7 +184,7 @@ Nguồn chuẩn: [`inventory.proto`](../contracts/src/main/proto/inventory.proto
 | `ALREADY_EXISTS` | Tạo sản phẩm đã có |
 | `FAILED_PRECONDITION` | Không đủ tồn kho; node không phải primary; điều kiện promote không thỏa |
 | `UNAUTHENTICATED` | Thiếu hoặc sai token |
-| `UNAVAILABLE` | Không kết nối được peer; cơ sở dữ liệu của node không khả dụng (chờ tối đa `DB_CONNECTION_TIMEOUT_MS`, mặc định 2000 ms); node đang `QUARANTINED` hoặc `RESTORING` |
+| `UNAVAILABLE` | Không kết nối được peer; cơ sở dữ liệu của node không khả dụng (chờ tối đa `DB_CONNECTION_TIMEOUT_MS`, mặc định 2000 ms); node đang `QUARANTINED` hoặc `RESTORING` (trừ `GetStatus`) |
 | `DEADLINE_EXCEEDED` | Hết thời gian chờ |
 
 | `ApplyCode` | Nghĩa |
@@ -197,7 +197,7 @@ Nguồn chuẩn: [`inventory.proto`](../contracts/src/main/proto/inventory.proto
 
 **Idempotency phía client:** mỗi lệnh kèm `request_id`; gửi lại cùng `request_id` nhận lại kết quả đã lưu, kể cả lệnh bị từ chối.
 
-**Deadline:** `GetStatus` 3 giây, `ApplyEvents` 5 giây, `FetchEvents` 5 giây.
+**Deadline:** `GetStatus` 3 giây; mọi RPC còn lại (`ExecuteCommand`, `GetInventory`, `ListInventory`, `ApplyEvents`, `FetchEvents`, `UpdatePolicy`, `Promote`) 5 giây.
 
 **Log:** mỗi node mang nhãn `[inventory-node-Sx]`. Log replication có `node_id`, `epoch`, dải `seq`, `event_id`, `request_id`, `retry_count`.
 
@@ -250,7 +250,7 @@ Riêng S4, replay chỉ đến hết lô đầy đủ cuối cùng; phần lẻ 
 | `QUARANTINED` | Kiểm tra bất biến thất bại, hoặc nhận `CONFLICT` | Không (`UNAVAILABLE`) | Không |
 | `RESTORING` | Đang xóa dữ liệu và replay | Không (`UNAVAILABLE`) | Không |
 
-Chuyển trạng thái: `READY → QUARANTINED → RESTORING → READY`. Node chỉ về `READY` khi replay xong và kiểm tra bất biến đạt; thất bại thì quay lại `QUARANTINED`.
+Chuyển trạng thái: `READY → QUARANTINED → RESTORING → READY`. Node chỉ về `READY` khi replay xong và kiểm tra bất biến đạt; thất bại thì quay lại `QUARANTINED`. `GetStatus` luôn trả lời ở mọi trạng thái để người vận hành và CLI biết trạng thái node.
 
 ## 7. Quyết định kỹ thuật
 
@@ -260,7 +260,7 @@ Quyết định mới được bổ sung vào bảng này qua Pull Request.
 |---|---|---|
 | 1 | Java 21, Spring Boot non-web, gRPC/Protobuf, Spring JDBC + Flyway; mỗi node một PostgreSQL | Hợp đồng rõ ràng, làm song song được. Không chọn RMI (phụ thuộc Java serialization), TCP thuần (tự xây framing), REST (ngoài phạm vi), Kafka (thay mất phần replication cần tự làm) |
 | 2 | Một node ghi; trả kết quả sau commit cục bộ; không chờ ACK replica; at-least-once + áp dụng idempotent | Đúng đề bài. Replica có thể trả dữ liệu cũ; không có nhất quán mạnh |
-| 3 | Promote thủ công node mới nhất, fencing bằng epoch; không failover tự động | Không có split-brain. Đổi lại hệ thống ngừng nhận ghi từ lúc primary sập đến khi promote |
+| 3 | Promote thủ công node mới nhất, fencing bằng epoch; không failover tự động | Không có hai lịch sử song song: replica từ chối epoch cũ, ghi mà primary cũ nhận khi bị cô lập bị loại bỏ. Đổi lại hệ thống ngừng nhận ghi từ lúc primary sập đến khi promote |
 | 4 | Một mã nguồn cho 4 node trên một máy và 4 máy vật lý; địa chỉ peer lấy từ cấu hình | Triển khai vật lý cần kiểm tra bind IP, firewall, cấu hình peer |
 | 5 | Phục hồi bằng replay operation log, không snapshot | Đủ cho khối lượng dữ liệu đồ án; operation log giữ vĩnh viễn trên mọi node |
 | 6 | Phiên bản chỉ khai báo trong `pom.xml` và Maven Wrapper, thư viện có trong BOM không ghi version riêng; không nâng Spring Boot, gRPC, Protobuf trong dự án; không dùng Lombok; định dạng theo `.editorconfig` | Mọi máy và CI build cùng một bộ phiên bản |
@@ -272,6 +272,7 @@ Quyết định mới được bổ sung vào bảng này qua Pull Request.
 | 12 | ACK cộng dồn theo `last_applied_seq`; `replication_progress` là nguồn sự thật | Mất một ACK không gây gửi lại kéo dài; outbox phải cập nhật cùng transaction |
 | 13 | Kiểm tra epoch theo bên gửi (`EventBatch.epoch`), không theo từng sự kiện | Replica nhận đủ lịch sử trước promote từ nguồn mới; primary cũ bị chặn ngay ở mức lô |
 | 14 | Lấy bù do bên gửi chủ động: gửi lại từ `last_applied_seq + 1` mà bên nhận báo; nguồn mới hỏi `GetStatus` để biết bắt đầu từ đâu; `FetchEvents` chỉ dùng để replay khi phục hồi | Một cơ chế lấy bù duy nhất. Outbox phải giữ sự kiện cho tới khi được ACK |
+| 15 | Lô S4 gửi nguyên lô trong một lần gọi `ApplyEvents` và áp dụng trong một transaction; giới hạn 100 sự kiện mỗi lần gọi chỉ áp dụng cho tuyến S2, S3 | S4 không bao giờ ở trạng thái nửa lô, retry đơn giản. Một lần gọi có thể vượt 100 sự kiện khi có sự kiện hệ thống xen giữa; sự kiện nhỏ nên không đáng kể |
 
 ## 8. Hạn chế đã biết
 

@@ -53,7 +53,7 @@ git switch -c feature/replication-apply-events
 - Integration test không được kết nối tới cơ sở dữ liệu của S1..S4.
 - Chính sách trễ được test bằng đồng hồ mô phỏng, không dùng `sleep`.
 - Không mô phỏng split-brain bằng cách chỉ đổi cờ vai trò trong bộ nhớ; dừng node thật bằng `stop-local.ps1`, dừng cơ sở dữ liệu bằng `local-pg.ps1 stop`.
-- Test của một kịch bản nghiệm thu ghi mã kịch bản (`T01`…`T22`) trong Javadoc.
+- Test của một kịch bản nghiệm thu ghi mã kịch bản (`T01`…`T22`) trong Javadoc. Danh sách kịch bản nghiệm thu do maintainer quản lý ngoài repo; hỏi maintainer khi chưa rõ mã của việc mình làm.
 
 | Chạy | Lệnh |
 |---|---|

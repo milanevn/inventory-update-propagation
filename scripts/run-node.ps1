@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Run ONE node in the foreground (physical-host mode B, or a single local node for debugging).
+  Run ONE node in the foreground (one node per machine in a multi-machine deployment, or a single local node for debugging).
 
 .DESCRIPTION
   Runs node-server in this console. Ctrl+C stops it gracefully (Spring shutdown hooks run),

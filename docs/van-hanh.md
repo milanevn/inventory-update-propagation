@@ -52,8 +52,11 @@ Biến môi trường của node (mặc định trong `node-server/src/main/reso
 | `DB_USER`, `DB_PASSWORD` | Tài khoản cơ sở dữ liệu | `inventory` / `local_only_change_me` (chỉ dùng cục bộ) |
 | `DB_CONNECTION_TIMEOUT_MS` | Thời gian chờ lấy kết nối | `2000` |
 | `PEER_S1` … `PEER_S4` | Địa chỉ `host:port` của các node | `localhost:9101` … `localhost:9104` |
+| `CLUSTER_TOKEN` | Token dùng chung cho RPC nội bộ (thiết kế, quyết định 7). Chưa được kiểm tra: xác thực chưa được triển khai | — |
 
 `local-pg.ps1` dùng thêm `PG_BIN`, `INVENTORY_PG_DATA` (thư mục dữ liệu) và `DB_PASSWORD`.
+
+Integration test đọc `TEST_DB_HOST`, `TEST_DB_PORT`, `TEST_DB_NAME`, `TEST_DB_USER`, `TEST_DB_PASSWORD`; mặc định trỏ tới instance TEST (`localhost:5549`, database và tài khoản `inventory`, mật khẩu như mặc định của `DB_PASSWORD`). Nếu đặt `DB_PASSWORD` khác khi chạy `local-pg.ps1 init` thì đặt `TEST_DB_PASSWORD` cùng giá trị.
 
 ## 4. Script
 
