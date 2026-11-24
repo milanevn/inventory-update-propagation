@@ -1,5 +1,6 @@
 /**
- * Replication engine: outbox dispatch, ordered idempotent apply on replicas, ACK/retry, duplicate and
+ * Replication engine: per-destination cursor over operation_log (replication_progress.last_acked_seq),
+ * ordered idempotent apply on replicas, ACK/retry, duplicate and
  * gap detection, catch-up via FetchEvents, and the gRPC implementation of
  * {@link edu.inventory.domain.ReplicationTransport}.
  *
