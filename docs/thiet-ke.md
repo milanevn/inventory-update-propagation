@@ -84,14 +84,14 @@ Mọi node có cùng schema, quản lý bằng migration Flyway trong `node-serv
 |---|---|
 | `products`, `stock_in`, `stock_out` | Sản phẩm và phiếu nhập/xuất. `voucher_no` do primary sinh: `IN-<epoch>-<seq>`, `OUT-<epoch>-<seq>` |
 | `inventory` | Tồn kho hiện tại của mỗi sản phẩm (`CHECK quantity >= 0`) |
-| `node_state` | Một dòng: `role`, `epoch`, `last_issued_seq`, `last_applied_seq`, trạng thái node. Được khóa để tuần tự hóa thứ tự ghi. `last_applied_seq` là tiến độ của node; ở primary nó luôn bằng `last_issued_seq` |
-| `operation_log` | Mọi sự kiện (`UNIQUE(epoch, seq)`), kèm `request_id` và `schema_version`. Giữ vĩnh viễn |
+| `node_state` | Một dòng: `role`, `epoch`, `last_issued_seq`, `last_applied_seq`, trạng thái node. Được khóa để tuần tự hóa thứ tự ghi. `last_applied_seq` là tiến độ của node; ở primary nó luôn bằng `last_issued_seq`. `role` được lấy từ `NODE_ROLE` ở lần khởi động đầu tiên (cơ sở dữ liệu mới); sau đó `node_state` là nguồn sự thật, promote và tự hạ vai trò đổi `role` tại đây |
+| `operation_log` | Mọi sự kiện (`seq` duy nhất, `UNIQUE(epoch, seq)`), kèm `request_id` và `schema_version`. Giữ vĩnh viễn |
 | `outbox` | Sự kiện chờ gửi theo từng đích: trạng thái, số lần retry, `eligible_at` và độ trễ đã áp dụng cho tuyến S3 |
 | `replication_progress` | Tiến độ ACK của từng peer; là nguồn sự thật về ACK |
 | `replication_batch` | Lô đang gửi cho đích theo lô (S4): `first_seq`, `last_seq`, trạng thái |
-| `processed_requests` | Kết quả theo `request_id`; `event_id` để trống với lệnh bị từ chối |
-| `replication_policy` | `delaySeconds` (0..3600, mặc định 5), `batchSize` (1..100, mặc định 3) và version cấu hình |
-| `epoch_history` | `epoch`, `start_seq`, `node_id`, nguồn của S4; dựng từ các sự kiện `EPOCH_START` |
+| `processed_requests` | Nội dung request và kết quả theo `request_id`; `event_id` để trống với lệnh bị từ chối |
+| `replication_policy` | Một dòng: `delaySeconds` (0..3600, mặc định 5), `batchSize` (1..100, mặc định 3) và version cấu hình |
+| `epoch_history` | `epoch`, `start_seq`, `node_id`, nguồn của S4; dựng từ các sự kiện `EPOCH_START`. Epoch 1 không có dòng: bắt đầu từ `seq` 1, nguồn của S4 là S2 |
 
 ## 4. Luồng xử lý
 
