@@ -12,7 +12,7 @@ Hệ thống quản lý kho phân tán gồm 4 node S1..S4, replication tự xâ
 | [docs/van-hanh.md](docs/van-hanh.md) | Cài đặt, chạy cụm, cấu hình, script, xử lý lỗi |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Nhánh, Pull Request, quy ước code, viết và chạy test, Definition of Done |
 
-- Trả lời người dùng và viết tài liệu bằng **tiếng Việt**. Code, tên biến, commit message, `.proto`, SQL và script viết bằng tiếng Anh. File `.ps1` chỉ dùng ký tự ASCII.
+- Trả lời người dùng và viết tài liệu bằng **tiếng Việt**. Code, tên biến, `.proto`, SQL và script viết bằng tiếng Anh; commit message viết bằng tiếng Việt theo quy ước trong `CONTRIBUTING.md`. File `.ps1` chỉ dùng ký tự ASCII.
 - Môi trường chính: Windows, PowerShell 5.1+, JDK 21, PostgreSQL 16 cài trực tiếp; không dùng Docker.
 
 ## Cấu trúc repo
@@ -44,7 +44,7 @@ Hệ thống quản lý kho phân tán gồm 4 node S1..S4, replication tự xâ
 - gRPC service mới: Spring bean kế thừa lớp `*ImplBase` sinh từ `.proto`; được đăng ký tự động, không sửa `GrpcServerLifecycle`.
 - Mỗi package tự quản lý repository JDBC của mình; lớp trong `grpc` không chứa SQL hay quy tắc nghiệp vụ.
 - Test: unit test `*Test`; integration test `*IT` kế thừa `AbstractNodeIT`. Mỗi test tự dọn dữ liệu, không phụ thuộc thứ tự. Chính sách trễ test bằng đồng hồ mô phỏng, không `sleep`. Test của kịch bản nghiệm thu ghi mã `Txx` trong Javadoc.
-- Nhánh `feature/<module>-<mo-ta-ngan>` tạo từ `main`. Commit theo Conventional Commits, scope là tên module, ví dụ `feat(replication): apply contiguous event batch`.
+- Nhánh `feature/<module>-<mo-ta-ngan>` tạo từ `main`. Commit theo Conventional Commits, scope là tên module; phần mô tả commit viết bằng tiếng Việt.
 
 ## Lệnh thường dùng
 
