@@ -27,7 +27,7 @@ git switch -c feature/replication-apply-events
 - Merge khi có ít nhất một approve và CI xanh. Thay đổi giao thức, schema hoặc quyền ghi của primary cần maintainer duyệt.
 - Merge bằng *Squash and merge*: mỗi Pull Request thành một commit trên `main`, tiêu đề Pull Request là commit message.
 - Khi các kịch bản nghiệm thu của một mốc đều đạt, maintainer gắn tag `v0.<n>.0` trên `main`; tag là mốc có thể quay lại.
-- Commit message và tiêu đề Pull Request theo [Conventional Commits](https://www.conventionalcommits.org/), scope là tên module, ví dụ `feat(replication): apply contiguous event batch`, `fix(inventory): reject stock out below zero`.
+- Commit message và tiêu đề Pull Request theo [Conventional Commits](https://www.conventionalcommits.org/): giữ type và scope theo quy ước tiếng Anh, scope là tên module; phần mô tả sau dấu `:` viết bằng tiếng Việt. Ví dụ: `feat(replication): áp dụng lô sự kiện liên tục`, `fix(inventory): từ chối xuất kho vượt tồn`.
 
 ## 3. Quy ước code
 
