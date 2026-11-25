@@ -164,17 +164,34 @@ class NodeCoreIT extends AbstractNodeIT {
     }
 
     @Test void replicaMarksOnlyTheNextContiguousSeqAndDoesNotIssue() {
-        tx.executeWithoutResult(status -> {
-            nodeState.lockForWrite();
-            operationLog.append(event(1, EventType.CREATE_PRODUCT, UUID.randomUUID()), COMMITTED_AT);
-            nodeState.markApplied(1);
-        });
+        jdbc.update("UPDATE node_state SET role = 'REPLICA' WHERE singleton = TRUE");
+        applyOnReplica(1);
 
-        assertThrows(IllegalStateException.class, () -> tx.executeWithoutResult(status -> nodeState.markApplied(3)));
+        assertThrows(IllegalStateException.class, () -> applyOnReplica(3));
         assertThrows(IllegalStateException.class, () -> tx.execute(status -> nodeState.issueNextSeq()));
         NodeState state = nodeState.read();
         assertEquals(0, state.lastIssuedSeq());
         assertEquals(1, state.lastAppliedSeq());
+        assertEquals(List.of(1L), jdbc.queryForList("SELECT seq FROM operation_log ORDER BY seq", Long.class));
+    }
+
+    @Test void replicaCannotMarkSeqMissingFromOperationLog() {
+        jdbc.update("UPDATE node_state SET role = 'REPLICA' WHERE singleton = TRUE");
+
+        assertThrows(IllegalStateException.class, () -> tx.executeWithoutResult(status -> {
+            nodeState.lockForWrite();
+            nodeState.markApplied(1);
+        }));
+        assertEquals(0, nodeState.read().lastAppliedSeq());
+    }
+
+    @Test void primaryCannotMarkApplied() {
+        assertThrows(IllegalStateException.class, () -> applyOnReplica(1));
+
+        NodeState state = nodeState.read();
+        assertEquals(0, state.lastIssuedSeq());
+        assertEquals(0, state.lastAppliedSeq());
+        assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM operation_log", Long.class));
     }
 
     @Test void writeMethodsRequireTheCallersTransaction() {
@@ -184,6 +201,15 @@ class NodeCoreIT extends AbstractNodeIT {
         assertThrows(IllegalTransactionStateException.class,
                 () -> operationLog.append(event(1, EventType.STOCK_IN, UUID.randomUUID()), COMMITTED_AT));
         assertEquals(0, nodeState.read().lastAppliedSeq());
+    }
+
+    /** The replica apply order from docs/thiet-ke.md section 4: lock, append the received event, mark applied. */
+    private void applyOnReplica(long seq) {
+        tx.executeWithoutResult(status -> {
+            nodeState.lockForWrite();
+            operationLog.append(event(seq, EventType.CREATE_PRODUCT, UUID.randomUUID()), COMMITTED_AT);
+            nodeState.markApplied(seq);
+        });
     }
 
     private long writeInTransaction() {

@@ -75,19 +75,23 @@ public class NodeStateRepository {
     }
 
     /**
-     * Replica and replay: records that the event with {@code seq} has been applied. Only the next
+     * Replica and replay: records that the event with {@code seq} has been applied. Call it after
+     * {@link OperationLogRepository#append} wrote that event in the same transaction. Only the next
      * contiguous {@code seq} is accepted; {@code last_issued_seq} is not touched.
      *
-     * @throws IllegalStateException if {@code seq != last_applied_seq + 1}
+     * @throws IllegalStateException if the node is not {@code REPLICA}, {@code seq != last_applied_seq + 1},
+     *         or {@code operation_log} has no row with this {@code seq}
      */
     @Transactional(propagation = Propagation.MANDATORY)
     public void markApplied(long seq) {
         int updated = jdbc.update("""
                 UPDATE node_state
                    SET last_applied_seq = ?, updated_at = CURRENT_TIMESTAMP
-                 WHERE singleton = TRUE AND last_applied_seq = ? - 1""", seq, seq);
+                 WHERE singleton = TRUE AND role = 'REPLICA' AND last_applied_seq = ? - 1
+                   AND EXISTS (SELECT 1 FROM operation_log WHERE seq = ?)""", seq, seq, seq);
         if (updated != 1) {
-            throw new IllegalStateException("Cannot mark seq " + seq + " applied: not contiguous with " + read());
+            throw new IllegalStateException("Cannot mark seq " + seq
+                    + " applied: node is not REPLICA, seq is not contiguous or not in operation_log " + read());
         }
     }
 

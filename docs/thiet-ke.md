@@ -71,7 +71,7 @@ Package trong `node-server` (`edu.inventory.node.*`); mỗi package tự quản 
 |---|---|
 | `config` | Cấu hình node |
 | `grpc` | Vòng đời gRPC server và các adapter; không chứa SQL hay quy tắc nghiệp vụ. Mọi bean `BindableService` được đăng ký tự động |
-| `core` | Phần bền dùng chung của node: dòng `node_state` (khóa `SELECT ... FOR UPDATE`, cấp `seq` ở primary, tiến độ áp dụng ở replica, vai trò và trạng thái bền) và ghi `operation_log`. Các hàm ghi chạy trong transaction của nơi gọi (`inventory`, `replication`, `recovery`), không tự mở transaction |
+| `core` | Phần bền dùng chung của node: dòng `node_state` (khóa `SELECT ... FOR UPDATE`, cấp `seq` ở primary, tiến độ áp dụng ở replica, vai trò và trạng thái bền) và ghi `operation_log`. Các hàm của luồng ghi chạy trong transaction của nơi gọi (`inventory`, `replication`, `recovery`), không tự mở transaction; riêng bước lưu vai trò lúc khởi động lần đầu tự mở transaction. Chỉ primary cấp được `seq`, chỉ replica ghi nhận được tiến độ áp dụng, và chỉ sau khi sự kiện đã có trong `operation_log` |
 | `inventory` | Nghiệp vụ và transaction ghi tại primary |
 | `replication` | Gửi sự kiện theo con trỏ của từng đích, áp dụng có thứ tự, ACK, retry, lấy bù |
 | `policy` | Ba chính sách lan truyền và thay đổi chính sách |
