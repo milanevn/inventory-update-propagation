@@ -14,7 +14,7 @@
 | `main` | Nhánh duy nhất lâu dài: luôn build, test và chạy được cụm 4 node. Chỉ nhận Pull Request từ các nhánh `feature/*`. |
 | `feature/<module>-<mo-ta-ngan>` | Mỗi việc một nhánh, tạo từ `main`, xóa sau khi merge. Ví dụ: `feature/contracts-v2`, `feature/replication-apply-events`, `feature/policy-delay-s3`. |
 
-`<module>` là tên module hoặc package trong [thiết kế](docs/thiet-ke.md#3-kiến-trúc) (`inventory`, `replication`, `policy`, `recovery`, `contracts`, `cli`...), hoặc `docs`, `scripts`. Sửa lỗi cũng dùng nhánh `feature/*`. Không tạo loại nhánh khác.
+`<module>` là tên module hoặc package trong [thiết kế](docs/thiet-ke.md#3-kiến-trúc) (`core`, `inventory`, `replication`, `policy`, `recovery`, `contracts`, `cli`...), hoặc `docs`, `scripts`. Sửa lỗi cũng dùng nhánh `feature/*`. Không tạo loại nhánh khác.
 
 ```powershell
 git switch main; git pull

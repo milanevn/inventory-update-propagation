@@ -21,7 +21,7 @@ Hệ thống quản lý kho phân tán gồm 4 node S1..S4, replication tự xâ
 |---|---|
 | `contracts/` | `inventory.proto`, nguồn chuẩn của giao thức; stub Java do Maven sinh |
 | `common-domain/` | Sự kiện domain và port (`ReplicationTransport`), không phụ thuộc gRPC |
-| `node-server/` | Server của S1..S4; package `config`, `grpc`, `inventory`, `replication`, `policy`, `recovery`; migration Flyway trong `src/main/resources/db/migration` |
+| `node-server/` | Server của S1..S4; package `config`, `grpc`, `core`, `inventory`, `replication`, `policy`, `recovery`; migration Flyway trong `src/main/resources/db/migration` |
 | `cli-client/` | Client dòng lệnh |
 | `scripts/` | Quản lý PostgreSQL cục bộ, chạy và dừng node, kiểm tra môi trường |
 
