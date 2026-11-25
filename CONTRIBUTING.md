@@ -34,7 +34,7 @@ git switch -c feature/replication-apply-events
 - **Giao thức:** `contracts/src/main/proto/inventory.proto` là nguồn chuẩn duy nhất. Không sửa code sinh tự động. Thay đổi không tương thích ngược phải được thống nhất trước khi merge.
 - **Schema:** không sửa migration đã phát hành; mọi thay đổi là migration mới `V<n>__<mo_ta>.sql`. Số `<n>` cấp theo thứ tự merge vào `main`: trước khi merge, nếu `main` đã có migration cùng số thì đổi số của mình sang số kế tiếp và chạy lại test. Kiểm migration chưa merge bằng integration test (instance TEST chạy Flyway `clean` mỗi lần); nếu đã chạy nó trên cụm cục bộ rồi mới sửa nội dung hoặc đổi số, node sẽ dừng với lỗi Flyway: xử lý theo [vận hành, mục 7](docs/van-hanh.md#7-lỗi-thường-gặp).
 - **Package:** đặt code vào đúng package theo [thiết kế](docs/thiet-ke.md#3-kiến-trúc).
-- **gRPC service:** chỉ cần là Spring bean kế thừa lớp `*ImplBase` sinh từ `.proto`; service được đăng ký tự động, không sửa `GrpcServerLifecycle`.
+- **gRPC service:** chỉ cần là Spring bean kế thừa lớp `*ImplBase` sinh từ `.proto`; service được đăng ký tự động, không sửa `GrpcServerLifecycle` (ngoại lệ duy nhất: gắn `ServerInterceptor` kiểm tra token).
 - **Cấu hình:** không hardcode địa chỉ, cổng hay vai trò node; mọi giá trị lấy từ cấu hình.
 - **Logging:** dùng SLF4J, không dùng `System.out` trong server. Log replication có `seq` và `event_id`.
 - **Phiên bản thư viện:** chỉ khai báo trong `pom.xml`; thư viện có trong BOM không ghi version riêng. Không dùng Lombok.

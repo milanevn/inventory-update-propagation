@@ -21,6 +21,8 @@ Client ──gRPC──> S1 PRIMARY ──ngay lập tức──> S2 REPLICA ─
 
 Thiết kế chi tiết: [docs/thiet-ke.md](docs/thiet-ke.md).
 
+**Tình trạng triển khai:** các ý trên là thiết kế đích. Hiện mới chạy được `NodeService.GetStatus` và phần nền dùng chung (schema, khóa và cấp `seq`, ghi và áp dụng sự kiện); các RPC còn lại trả `UNIMPLEMENTED`.
+
 ## Yêu cầu
 
 - JDK 21
@@ -38,7 +40,7 @@ cd inventory-update-propagation
 .\scripts\local-pg.ps1 init          # tạo PostgreSQL cho S1..S4 (5541..5544) và TEST (5549)
 .\scripts\doctor.ps1                 # kiểm tra môi trường, không được có dòng FAIL
 .\mvnw.cmd -B -ntp clean install     # build, unit test và integration test
-.\scripts\run-local.ps1              # chạy S1..S4, chờ đến khi READY
+.\scripts\run-local.ps1              # chạy S1..S4, chờ đến khi JVM khởi động xong
 .\scripts\cluster-status.ps1         # xem trạng thái các node
 ```
 

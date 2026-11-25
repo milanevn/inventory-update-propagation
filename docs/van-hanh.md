@@ -65,7 +65,7 @@ Integration test đọc `TEST_DB_HOST`, `TEST_DB_PORT`, `TEST_DB_NAME`, `TEST_DB
 | `doctor.ps1` | Kiểm tra môi trường; chỉ đọc |
 | `local-pg.ps1 init\|start\|stop\|status [-Node S1..S4\|TEST]` | Quản lý các PostgreSQL instance độc lập |
 | `local-pg.ps1 reset\|destroy [-Node …] [-Force]` | `reset`: xóa và tạo lại database (Flyway migrate lại khi node khởi động). `destroy`: xóa cả thư mục dữ liệu |
-| `run-local.ps1 [-Node Sx] [-NoWait]` | Chạy node ở nền, chờ `READY`; node không lên được thì in nguyên nhân và trả mã lỗi 1 |
+| `run-local.ps1 [-Node Sx] [-NoWait]` | Chạy node ở nền, chờ tới khi log có `Started InventoryNodeApplication` (script in là `READY`; chưa hỏi `GetStatus`, kiểm tra trạng thái thật bằng `cluster-status.ps1`); node không lên được thì in nguyên nhân và trả mã lỗi 1 |
 | `stop-local.ps1 [-Node Sx]` | Dừng node. Trên Windows tương đương crash: shutdown hook không chạy |
 | `run-node.ps1 -Id Sx` | Chạy một node ở foreground (dùng khi triển khai nhiều máy); `Ctrl+C` để dừng có kiểm soát |
 | `cluster-status.ps1 [host:port …]` | Gọi `GetStatus`; mặc định hỏi 4 node cục bộ |

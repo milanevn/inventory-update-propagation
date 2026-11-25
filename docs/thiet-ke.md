@@ -255,7 +255,7 @@ Phải chọn node mới nhất vì chỉ node đó giữ được nhiều lịc
 | Dữ liệu replica bị sửa sai | Kiểm tra bất biến khi khởi động và mỗi 30 giây: tồn kho = tổng nhập − tổng xuất, và không âm | Cách ly node, xóa dữ liệu, replay toàn bộ log, kiểm tra lại |
 | Crash hoặc mất mạng | Bên nhận trả `GAP_DETECTED` hoặc nguồn chưa nhận được ACK | Nguồn gửi lại từ `last_applied_seq + 1` |
 
-Riêng S4, replay chỉ đến hết lô đầy đủ cuối cùng; phần lẻ tiếp tục chờ theo chính sách lô.
+Riêng S4, replay chỉ đến hết lô đầy đủ cuối cùng; phần lẻ tiếp tục chờ theo chính sách lô. Riêng S3, replay vẫn giữ độ trễ (FR-04): `FetchEvents` gửi S3 chỉ trả các sự kiện có `committed_at + n ≤ now` theo đồng hồ của nguồn, với n là `delaySeconds` có hiệu lực tại sự kiện đó; phần chưa đủ hạn được nguồn gửi tiếp như bình thường khi đến hạn.
 
 **Kích hoạt và tiếp tục replay:**
 
