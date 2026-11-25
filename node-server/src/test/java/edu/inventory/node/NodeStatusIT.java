@@ -30,14 +30,31 @@ class NodeStatusIT extends AbstractNodeIT {
         jdbc.update("UPDATE node_state SET role = 'PRIMARY', status = 'READY' WHERE singleton = TRUE");
     }
 
-    @Test void flywayCreatesTheV2SchemaWithOneNodeStateRow() {
+    @Test void flywayCreatesTheV3SchemaWithOneNodeStateRow() {
         List<String> tables = jdbc.queryForList(
                 "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'", String.class);
         assertTrue(tables.containsAll(List.of("products", "stock_in", "stock_out", "inventory", "node_state",
-                "operation_log", "outbox", "replication_progress", "replication_batch", "processed_requests",
+                "operation_log", "replication_progress", "processed_requests",
                 "replication_policy", "epoch_history")), tables::toString);
-        assertFalse(tables.contains("snapshot_metadata"), tables::toString);
+        for (String dropped : List.of("snapshot_metadata", "outbox", "replication_batch")) {
+            assertFalse(tables.contains(dropped), tables::toString);
+        }
         assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM node_state", Integer.class));
+    }
+
+    @Test void operationLogRequiresCommittedAtAndProgressHasRetryState() {
+        assertEquals("NO", columnNullability("operation_log", "committed_at"));
+        assertEquals("NO", columnNullability("replication_progress", "retry_count"));
+        assertEquals("YES", columnNullability("replication_progress", "next_retry_at"));
+        assertEquals("YES", columnNullability("replication_progress", "last_error"));
+        assertEquals(List.of("last_acked_seq", "last_error", "next_retry_at", "peer_id", "retry_count", "updated_at"),
+                jdbc.queryForList("SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' "
+                        + "AND table_name = 'replication_progress' ORDER BY column_name", String.class));
+    }
+
+    private String columnNullability(String table, String column) {
+        return jdbc.queryForObject("SELECT is_nullable FROM information_schema.columns "
+                + "WHERE table_schema = 'public' AND table_name = ? AND column_name = ?", String.class, table, column);
     }
 
     @Test void configuredRoleIsStoredInNodeStateOnFirstStart() {
