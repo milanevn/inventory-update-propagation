@@ -47,6 +47,9 @@ class NodeStatusIT extends AbstractNodeIT {
         assertEquals("NO", columnNullability("replication_progress", "retry_count"));
         assertEquals("YES", columnNullability("replication_progress", "next_retry_at"));
         assertEquals("YES", columnNullability("replication_progress", "last_error"));
+        assertEquals(List.of("last_acked_seq", "last_error", "next_retry_at", "peer_id", "retry_count", "updated_at"),
+                jdbc.queryForList("SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' "
+                        + "AND table_name = 'replication_progress' ORDER BY column_name", String.class));
     }
 
     private String columnNullability(String table, String column) {
