@@ -1,7 +1,8 @@
 /**
  * Durable node core shared by the primary write path, replicas and replay: the single
  * {@code node_state} row (lock, sequence numbers, progress, durable role and status) and the
- * {@code operation_log}.
+ * {@code operation_log}, the JSON and wire format of events ({@code EventCodec}) and applying one
+ * event to the node ({@code EventApplier}).
  *
  * <p>Write-path methods join the caller's transaction and never open their own, so the caller commits
  * business rows, {@code operation_log}, {@code processed_requests} and {@code node_state} atomically.

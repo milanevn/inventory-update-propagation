@@ -71,7 +71,7 @@ Package trong `node-server` (`edu.inventory.node.*`); mỗi package tự quản 
 |---|---|
 | `config` | Cấu hình node |
 | `grpc` | Vòng đời gRPC server và các adapter; không chứa SQL hay quy tắc nghiệp vụ. Mọi bean `BindableService` được đăng ký tự động |
-| `core` | Phần bền dùng chung của node: dòng `node_state` (khóa `SELECT ... FOR UPDATE`, cấp `seq` ở primary, tiến độ áp dụng ở replica, vai trò và trạng thái bền) và ghi `operation_log`. Các hàm của luồng ghi chạy trong transaction của nơi gọi (`inventory`, `replication`, `recovery`), không tự mở transaction; riêng bước lưu vai trò lúc khởi động lần đầu tự mở transaction. Chỉ primary cấp được `seq`, chỉ replica ghi nhận được tiến độ áp dụng, và chỉ sau khi sự kiện đã có trong `operation_log` |
+| `core` | Phần bền dùng chung của node: dòng `node_state` (khóa `SELECT ... FOR UPDATE`, cấp `seq` ở primary, tiến độ áp dụng ở replica, vai trò và trạng thái bền) và ghi `operation_log`; chuyển đổi sự kiện ↔ JSON ↔ `ReplicationEvent` (`EventCodec`) và áp dụng một sự kiện (`EventApplier`, mục "Định dạng JSON"). Các hàm của luồng ghi chạy trong transaction của nơi gọi (`inventory`, `replication`, `recovery`), không tự mở transaction; riêng bước lưu vai trò lúc khởi động lần đầu tự mở transaction. Chỉ primary cấp được `seq`, chỉ replica ghi nhận được tiến độ áp dụng, và chỉ sau khi sự kiện đã có trong `operation_log` |
 | `inventory` | Nghiệp vụ và transaction ghi tại primary |
 | `replication` | Gửi sự kiện theo con trỏ của từng đích, áp dụng có thứ tự, ACK, retry, lấy bù |
 | `policy` | Ba chính sách lan truyền và thay đổi chính sách |
@@ -91,6 +91,22 @@ Mọi node có cùng schema, quản lý bằng migration Flyway trong `node-serv
 | `processed_requests` | Nội dung request và kết quả theo `request_id`; `event_id` để trống với lệnh bị từ chối |
 | `replication_policy` | Một dòng: `delaySeconds` (0..3600, mặc định 5), `batchSize` (1..100, mặc định 3) và version cấu hình |
 | `epoch_history` | `epoch`, `start_seq`, `node_id`, nguồn của S4; dựng từ các sự kiện `EPOCH_START`. Epoch 1 không có dòng: bắt đầu từ `seq` 1, nguồn của S4 là S2 |
+
+### Định dạng JSON
+
+Các cột JSON (`jsonb`) dùng định dạng `schema_version = 1`, tên trường kiểu camelCase, bỏ trường rỗng. Mọi node tạo và đọc JSON qua cùng một lớp chuyển đổi trong package `core` (`EventCodec`, Jackson với cấu hình cố định); không dựng JSON bằng SQL. Hai bản JSON được so bằng phép so `jsonb`, không so chuỗi.
+
+| Sự kiện | `operation_log.payload` | `processed_requests.request_payload` | `processed_requests.response_payload` |
+|---|---|---|---|
+| `CREATE_PRODUCT` | `{"productCode", "productName", "unit"}` | `{"operation": "CREATE_PRODUCT", "productCode", "productName", "unit"}` | `{"committed": true, "eventId", "epoch", "seq"}` |
+| `STOCK_IN` | `{"productCode", "quantity", "voucherNo"}`, `voucherNo = IN-<epoch>-<seq>` | `{"operation": "STOCK_IN", "productCode", "quantity"}` | `{"committed": true, "eventId", "epoch", "seq", "voucherNo"}` |
+| `STOCK_OUT` | như `STOCK_IN`, `voucherNo = OUT-<epoch>-<seq>` | `{"operation": "STOCK_OUT", "productCode", "quantity"}` | như `STOCK_IN` |
+| `POLICY_CHANGE` | `{"parameter": "DELAY_SECONDS" \| "BATCH_SIZE", "newValue", "configurationVersion"}` | `{"operation": "POLICY_CHANGE", "parameter", "newValue"}`, khóa là `admin_request_id` | `{"accepted": true, "configurationVersion"}` |
+| `EPOCH_START` | `{"primaryNodeId", "s4SourceNodeId"}` | không có dòng | không có dòng |
+
+- `request_payload` chỉ giữ các trường của thao tác (ví dụ nhập kho không có `productName`) nên replica dựng lại được đúng bản primary đã lưu từ `ReplicationEvent`; vì vậy sau promote, gửi lại cùng `request_id` vẫn nhận kết quả cũ (T23). `voucherNo` do primary sinh nên không nằm trong `request_payload`.
+- Lệnh bị từ chối chỉ có ở primary, không có sự kiện: `response_payload` là `{"committed": false, "code": "<mã gRPC>", "message"}`.
+- Áp dụng một sự kiện (bảng nghiệp vụ hoặc `replication_policy`, `epoch_history`; dòng `operation_log`; dòng `processed_requests`) do `EventApplier` trong package `core` làm, trong transaction của nơi gọi; primary, replica và replay cùng dùng. Sự kiện không áp dụng được vào dữ liệu hiện có (sản phẩm đã có hoặc chưa có, không đủ tồn kho) thì không ghi gì; ở replica điều này nghĩa là dữ liệu đã lệch nguồn.
 
 ## 4. Luồng xử lý
 
