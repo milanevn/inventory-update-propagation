@@ -78,17 +78,15 @@ Package trong `node-server` (`edu.inventory.node.*`); mỗi package tự quản 
 
 ### Mô hình dữ liệu
 
-Mọi node có cùng schema, quản lý bằng migration Flyway trong `node-server/src/main/resources/db/migration`. Migration đã phát hành không được sửa; mọi thay đổi là một migration mới.
+Mọi node có cùng schema, quản lý bằng migration Flyway trong `node-server/src/main/resources/db/migration`. Migration đã phát hành không được sửa; mọi thay đổi là một migration mới. Migration V3 xóa `outbox` và `replication_batch` của V1/V2: hàng chờ gửi là `operation_log`, biên lô S4 tính từ log (quyết định 17).
 
 | Bảng | Nội dung |
 |---|---|
 | `products`, `stock_in`, `stock_out` | Sản phẩm và phiếu nhập/xuất. `voucher_no` do primary sinh: `IN-<epoch>-<seq>`, `OUT-<epoch>-<seq>` |
 | `inventory` | Tồn kho hiện tại của mỗi sản phẩm (`CHECK quantity >= 0`) |
 | `node_state` | Một dòng: `role`, `epoch`, `last_issued_seq`, `last_applied_seq`, trạng thái node. Được khóa để tuần tự hóa thứ tự ghi. `last_applied_seq` là tiến độ của node; ở primary nó luôn bằng `last_issued_seq`. `role` được lấy từ `NODE_ROLE` ở lần khởi động đầu tiên (cơ sở dữ liệu mới); sau đó `node_state` là nguồn sự thật, promote và tự hạ vai trò đổi `role` tại đây |
-| `operation_log` | Mọi sự kiện (`seq` duy nhất, `UNIQUE(epoch, seq)`), kèm `request_id`, `schema_version` và `committed_at` (thời điểm commit theo đồng hồ của primary; thêm ở migration V3). Giữ vĩnh viễn; đồng thời là hàng chờ gửi cho mọi đích |
-| `replication_progress` | Mỗi node đích một dòng: con trỏ `last_acked_seq` (nguồn sự thật về ACK) và trạng thái retry (số lần thử, lần thử kế tiếp, lỗi gần nhất) |
-| `replication_batch` | Không bắt buộc: biên lô S4 tính được từ `operation_log`; chỉ giữ nếu cần hiển thị lô đang gửi |
-| `outbox` | Bảng của V1/V2, không dùng; xóa ở migration V3. Thay bằng con trỏ của từng đích (quyết định 17) |
+| `operation_log` | Mọi sự kiện (`seq` duy nhất, `UNIQUE(epoch, seq)`), kèm `request_id`, `schema_version` và `committed_at` (thời điểm commit theo đồng hồ của primary, `NOT NULL`, do ứng dụng ghi từ `Clock` chứ không lấy mặc định của cơ sở dữ liệu). Giữ vĩnh viễn; đồng thời là hàng chờ gửi cho mọi đích |
+| `replication_progress` | Mỗi node đích một dòng: con trỏ `last_acked_seq` (nguồn sự thật về ACK) và trạng thái retry `retry_count`, `next_retry_at`, `last_error` |
 | `processed_requests` | Nội dung request và kết quả theo `request_id`; `event_id` để trống với lệnh bị từ chối |
 | `replication_policy` | Một dòng: `delaySeconds` (0..3600, mặc định 5), `batchSize` (1..100, mặc định 3) và version cấu hình |
 | `epoch_history` | `epoch`, `start_seq`, `node_id`, nguồn của S4; dựng từ các sự kiện `EPOCH_START`. Epoch 1 không có dòng: bắt đầu từ `seq` 1, nguồn của S4 là S2 |
