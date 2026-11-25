@@ -41,7 +41,7 @@ Client thực hiện các thao tác quản lý sản phẩm, nhập kho, xuất 
 | Sự kiện | Một thay đổi đã commit tại primary, lưu trong `operation_log`; có `event_id` (UUID) và cặp `(epoch, seq)` |
 | Sự kiện nghiệp vụ / hệ thống | Nghiệp vụ: `CREATE_PRODUCT`, `STOCK_IN`, `STOCK_OUT`. Hệ thống: `POLICY_CHANGE` (đổi chính sách), `EPOCH_START` (bắt đầu epoch sau promote) |
 | `seq` | Số thứ tự sự kiện do primary cấp, liên tục trên toàn bộ lịch sử, kể cả qua các lần promote |
-| `epoch` | Nhiệm kỳ của primary; bắt đầu từ 1, tăng 1 sau mỗi lần promote |
+| `epoch` | Nhiệm kỳ của primary; bắt đầu từ 1 (S1). Mỗi lần promote, ứng viên lấy epoch mới lớn hơn mọi epoch nó biết và cấp riêng theo node (mục 6 "Promote"), nên hai node không bao giờ dùng chung một epoch |
 | Con trỏ của đích | `last_acked_seq` của một node đích trong `replication_progress`: vị trí trong `operation_log` mà đích đã xác nhận. Bên gửi gửi các sự kiện có `seq` lớn hơn con trỏ |
 | ACK | Replica xác nhận đã áp dụng; `last_applied_seq` trong phản hồi xác nhận mọi sự kiện có `seq` nhỏ hơn hoặc bằng nó |
 | Nguồn của replica | Node gửi sự kiện cho replica đó: S2, S3 nhận từ primary; S4 nhận từ S2 (xem mục 4) |
@@ -85,7 +85,7 @@ Mọi node có cùng schema, quản lý bằng migration Flyway trong `node-serv
 |---|---|
 | `products`, `stock_in`, `stock_out` | Sản phẩm và phiếu nhập/xuất. `voucher_no` do primary sinh: `IN-<epoch>-<seq>`, `OUT-<epoch>-<seq>` |
 | `inventory` | Tồn kho hiện tại của mỗi sản phẩm (`CHECK quantity >= 0`) |
-| `node_state` | Một dòng: `role`, `epoch`, `last_issued_seq`, `last_applied_seq`, trạng thái node. Được khóa để tuần tự hóa thứ tự ghi. `last_applied_seq` là tiến độ của node; ở primary nó luôn bằng `last_issued_seq`. `role` được lấy từ `NODE_ROLE` ở lần khởi động đầu tiên (cơ sở dữ liệu mới); sau đó `node_state` là nguồn sự thật, promote và tự hạ vai trò đổi `role` tại đây |
+| `node_state` | Một dòng: `role`, `epoch`, `last_issued_seq`, `last_applied_seq`, trạng thái node. Được khóa để tuần tự hóa thứ tự ghi. `last_applied_seq` là tiến độ của node; ở primary nó luôn bằng `last_issued_seq`. `role` được lấy từ `NODE_ROLE` ở lần khởi động đầu tiên (cơ sở dữ liệu mới), riêng `PRIMARY` chỉ khi cụm mới tinh (mục 6 "Khởi động an toàn"); sau đó `node_state` là nguồn sự thật, promote và tự hạ vai trò đổi `role` tại đây |
 | `operation_log` | Mọi sự kiện (`seq` duy nhất, `UNIQUE(epoch, seq)`), kèm `request_id`, `schema_version` và `committed_at` (thời điểm node ghi dòng này, theo đồng hồ của chính node đó: primary lúc commit lệnh, replica lúc áp dụng sự kiện; `ReplicationEvent` không mang thời gian của primary. `NOT NULL`, do ứng dụng ghi từ `Clock` chứ không lấy mặc định của cơ sở dữ liệu). Giữ vĩnh viễn; đồng thời là hàng chờ gửi cho mọi đích |
 | `replication_progress` | Mỗi node đích (`peer_id`) một dòng: con trỏ `last_acked_seq` (nguồn sự thật về ACK) và trạng thái retry `retry_count`, `next_retry_at`, `last_error`. Không lưu riêng tiến độ của bên nhận: `last_applied_seq` trong `ApplyReply` hoặc `GetStatus` chỉ dùng để dời con trỏ |
 | `processed_requests` | Nội dung request và kết quả theo `request_id`; `event_id` để trống với lệnh bị từ chối |
@@ -161,6 +161,7 @@ Node quay lại sau khi đã có promote (S1, hoặc S2 khi không còn là ngu�
 2. Khóa `node_state`, so `seq` của sự kiện với tiến độ hiện tại:
    - đã có: `DUPLICATE`, hoặc `CONFLICT` nếu nội dung khác (so sánh trực tiếp các trường của sự kiện); `CONFLICT` đưa node sang `QUARANTINED`;
    - nhảy cóc: `GAP_DETECTED`, trạng thái không đổi;
+   - lô có cả phần đã có và phần mới: so từng sự kiện đã có; có một sự kiện khác nội dung thì trả `CONFLICT` cho cả lô và không áp dụng gì; còn lại bỏ qua phần đã có, áp dụng phần mới và trả `APPLIED`; cả lô đều đã có thì `DUPLICATE`;
    - đúng thứ tự: áp dụng nghiệp vụ, ghi log (`committed_at` theo đồng hồ của replica) và `processed_requests`, tăng `last_applied_seq`. Node là nguồn của S4 không ghi gì thêm: worker tuyến S4 đọc thẳng `operation_log` của node theo con trỏ của S4.
 3. Commit, rồi trả `ApplyReply` kèm `last_applied_seq` hiện tại.
 
@@ -204,9 +205,9 @@ Nguồn chuẩn: [`inventory.proto`](../contracts/src/main/proto/inventory.proto
 
 | `ApplyCode` | Nghĩa |
 |---|---|
-| `APPLIED` | Đã áp dụng |
-| `DUPLICATE` | Đã có, cùng nội dung; tính là ACK |
-| `CONFLICT` | Đã có `seq` đó nhưng nội dung khác; bên nhận chuyển sang `QUARANTINED` |
+| `APPLIED` | Đã áp dụng (phần đầu lô đã có cùng nội dung thì được bỏ qua) |
+| `DUPLICATE` | Cả lô đã có, cùng nội dung; tính là ACK |
+| `CONFLICT` | Có `seq` đã có nhưng nội dung khác; không áp dụng sự kiện nào của lô, bên nhận chuyển sang `QUARANTINED` |
 | `GAP_DETECTED` | Thiếu sự kiện phía trước; bên gửi gửi lại từ `last_applied_seq + 1` |
 | `STALE_EPOCH` | Bên gửi thuộc epoch cũ |
 
@@ -227,6 +228,7 @@ Nguồn chuẩn: [`inventory.proto`](../contracts/src/main/proto/inventory.proto
 | Chỉ S1 sập | Promote thủ công node mới nhất trong S2, S3, S4. |
 | S1 và S2 cùng sập | Promote thủ công node mới nhất trong S3, S4. |
 | Primary cũ quay lại sau khi đã promote | Tự chuyển thành replica, liệt kê cập nhật đã mất, đồng bộ lại. |
+| Primary mất cơ sở dữ liệu rồi khởi động lại | Không tự làm primary với `seq` 0 (mục "Khởi động an toàn"); vào `REPLICA` + `RESTORING`, replay sau khi người vận hành đã promote node khác. |
 | Dữ liệu replica bị tổn hại | Cách ly và phục hồi bằng replay. |
 
 ### Promote
@@ -235,16 +237,24 @@ Người vận hành chạy lệnh `promote` của CLI sau khi xác nhận prima
 
 1. **Kiểm tra an toàn:** primary hiện tại còn trả lời `GetStatus` thì từ chối promote.
 2. **Chọn ứng viên:** trong các node đang `READY`, chọn node có `(epoch, last_applied_seq)` cao nhất. Bằng nhau thì ưu tiên S2, rồi S3, rồi S4.
-3. **Fencing bằng epoch:** ứng viên đặt `last_issued_seq = last_applied_seq`, tăng `epoch` thêm 1 và ghi sự kiện `EPOCH_START` (epoch, `start_seq`, node, nguồn của S4) tại `start_seq = last_applied_seq + 1`. Mọi RPC ghi và RPC replication kiểm tra epoch; yêu cầu thuộc epoch cũ bị từ chối.
-4. **Chuyển vai trò:** ứng viên đặt `role = PRIMARY` và nhận ghi với `seq` tiếp nối. Mỗi nguồn của epoch mới hỏi `GetStatus` các replica mình phụ trách rồi gửi tiếp (mục 4, tuyến lan truyền).
+3. **Fencing bằng epoch và chuyển vai trò, trong một transaction:** ứng viên chọn epoch mới là số nhỏ nhất lớn hơn mọi epoch nó biết (của chính nó và của các peer trả lời `GetStatus`) và có `epoch mod 4` bằng số thứ tự của node (S1 = 1, S2 = 2, S3 = 3, S4 = 0), nên hai node không bao giờ dùng chung một epoch. Ứng viên đặt `role = PRIMARY`, epoch mới, `last_issued_seq = last_applied_seq`, rồi mới cấp `start_seq = last_applied_seq + 1` cho sự kiện `EPOCH_START` (epoch, node, nguồn của S4) và áp dụng nó như mọi sự kiện. Mọi RPC ghi và RPC replication kiểm tra epoch: lệnh ghi tới node không còn là primary trả `FAILED_PRECONDITION`, lô từ bên gửi có epoch cũ trả `STALE_EPOCH`.
+4. **Nhận ghi:** sau khi commit, ứng viên nhận ghi với `seq` tiếp nối. Mỗi nguồn của epoch mới hỏi `GetStatus` các replica mình phụ trách rồi gửi tiếp (mục 4, tuyến lan truyền).
 5. **Báo cáo:** in primary mới, epoch mới, `start_seq` và `seq` cao nhất của từng node.
 
 Phải chọn node mới nhất vì chỉ node đó giữ được nhiều lịch sử nhất. Ví dụ S1 ở `seq` 105, S2 ở 104, S3 ở 100: promote S3 sẽ ghi đè các cập nhật 101–104 mà S2 đã có; promote S2 chỉ mất cập nhật 105, vốn chưa đến được node nào.
 
+### Khởi động an toàn
+
+Node vừa khởi động chưa nhận ghi hay sự kiện cho tới khi kiểm tra xong: `ExecuteCommand`, `ApplyEvents`, `FetchEvents`, `UpdatePolicy`, `Promote` trả `UNAVAILABLE`; `GetStatus` vẫn trả lời.
+
+1. **Cơ sở dữ liệu mới với `NODE_ROLE = PRIMARY`:** chỉ làm primary khi mọi peer trả lời `GetStatus` và đều có `last_applied_seq = 0` (cụm mới tinh). Chưa liên lạc được đủ peer thì chờ và thử lại. Có peer đã có dữ liệu thì node vào `REPLICA` + `RESTORING` và replay sau khi có primary (mục "Phục hồi dữ liệu").
+2. **Node đã lưu `role = PRIMARY` khởi động lại:** hỏi `GetStatus` các peer. Có peer khác đang là `PRIMARY`, với epoch bất kỳ, thì chuyển sang `REPLICA` và làm theo mục "Primary cũ quay lại"; không so epoch vì node vừa sập có thể giữ epoch cao hơn của một lần promote chưa ai biết. Không peer nào là `PRIMARY` thì tiếp tục làm primary. Chưa liên lạc được peer nào thì chờ và thử lại.
+3. **Replica:** như mục "Kích hoạt và tiếp tục replay".
+
 ### Primary cũ quay lại
 
-1. Khi khởi động, node hỏi `GetStatus` các peer; thấy epoch cao hơn thì chuyển sang `REPLICA` và không nhận ghi. Primary đang chạy mà nhận `STALE_EPOCH` hoặc thấy epoch cao hơn cũng tự chuyển ngay (trường hợp chỉ mất mạng trong lúc promote).
-2. Các sự kiện của node có `seq ≥ start_seq` của epoch **ngay sau** epoch của node (tra trong `epoch_history` của primary mới) bị loại bỏ, ghi log và in ra như **danh sách cập nhật đã mất**.
+1. Khi khởi động, node làm theo mục "Khởi động an toàn" bước 2 và không nhận ghi. Primary đang chạy mà nhận `STALE_EPOCH` hoặc thấy epoch cao hơn cũng tự chuyển ngay (trường hợp chỉ mất mạng trong lúc promote).
+2. Các sự kiện của node có `seq ≥ start_seq` của epoch kế tiếp sau epoch của node trong `epoch_history` của primary mới bị loại bỏ, ghi log và in ra như **danh sách cập nhật đã mất**.
 3. Node xóa dữ liệu, replay từ primary mới, rồi nhận theo chính sách "ngay lập tức".
 
 ### Phục hồi dữ liệu
@@ -259,7 +269,7 @@ Riêng S4, replay chỉ đến hết lô đầy đủ cuối cùng; phần lẻ 
 
 **Kích hoạt và tiếp tục replay:**
 
-1. Replica khởi động với `last_applied_seq = 0` chuyển sang `RESTORING`, hỏi `GetStatus` các peer cho tới khi tìm được primary, rồi replay qua `FetchEvents`. Primary có `last_issued_seq = 0` thì không có gì để replay và node về `READY` ngay. Primary không tự replay.
+1. Replica khởi động với `last_applied_seq = 0` chuyển sang `RESTORING`, hỏi `GetStatus` các peer cho tới khi tìm được primary, rồi replay qua `FetchEvents`. Node có cơ sở dữ liệu mới với `NODE_ROLE = PRIMARY` làm theo mục "Khởi động an toàn". Primary không tự replay.
 2. Bắt đầu phục hồi (cả khi bị cách ly): xóa dữ liệu nghiệp vụ, đặt `last_applied_seq = 0` và `status = RESTORING` trong cùng một transaction.
 3. Mỗi lô `FetchEvents` được áp dụng như tại replica (mục 4): theo thứ tự `seq`, trong transaction, tăng `last_applied_seq`.
 4. Replay bị gián đoạn (crash, mất kết nối tới primary): node khởi động lại vẫn ở `RESTORING` và tiếp tục từ `last_applied_seq + 1`. Dữ liệu đã replay là một tiền tố hợp lệ của lịch sử nên không cần xóa lại.
@@ -273,7 +283,7 @@ Riêng S4, replay chỉ đến hết lô đầy đủ cuối cùng; phần lẻ 
 | `QUARANTINED` | Kiểm tra bất biến thất bại, hoặc nhận `CONFLICT` | Không (`UNAVAILABLE`) | Không |
 | `RESTORING` | Đang xóa dữ liệu và replay; lưu bền trong `node_state` | Không (`UNAVAILABLE`) | Không |
 
-Chuyển trạng thái: `READY → QUARANTINED → RESTORING → READY`. Node chỉ về `READY` khi replay xong và kiểm tra bất biến đạt; thất bại thì quay lại `QUARANTINED`. `GetStatus` luôn trả lời ở mọi trạng thái để người vận hành và CLI biết trạng thái node.
+Chuyển trạng thái: `READY → QUARANTINED → RESTORING → READY`. Replica ở `QUARANTINED` tự chuyển sang `RESTORING` và replay khi liên lạc được primary; primary ở `QUARANTINED` không tự replay (không có nguồn), người vận hành promote node khác. Node chỉ về `READY` khi replay xong và kiểm tra bất biến đạt; thất bại thì quay lại `QUARANTINED`. `GetStatus` luôn trả lời ở mọi trạng thái để người vận hành và CLI biết trạng thái node.
 
 ## 7. Quyết định kỹ thuật
 
@@ -283,7 +293,7 @@ Quyết định mới được bổ sung vào bảng này qua Pull Request.
 |---|---|---|
 | 1 | Java 21, Spring Boot non-web, gRPC/Protobuf, Spring JDBC + Flyway; mỗi node một PostgreSQL | Hợp đồng rõ ràng, làm song song được. Không chọn RMI (phụ thuộc Java serialization), TCP thuần (tự xây framing), REST (ngoài phạm vi), Kafka (thay mất phần replication cần tự làm) |
 | 2 | Một node ghi; trả kết quả sau commit cục bộ; không chờ ACK replica; at-least-once + áp dụng idempotent | Đúng đề bài. Replica có thể trả dữ liệu cũ; không có nhất quán mạnh |
-| 3 | Promote thủ công node mới nhất, fencing bằng epoch; không failover tự động | Không có hai lịch sử song song: replica từ chối epoch cũ, ghi mà primary cũ nhận khi bị cô lập bị loại bỏ. Đổi lại hệ thống ngừng nhận ghi từ lúc primary sập đến khi promote |
+| 3 | Promote thủ công node mới nhất, fencing bằng epoch cấp riêng theo node (`epoch mod 4` = số thứ tự node, giống số ballot của Paxos); không failover tự động | Không có hai lịch sử song song: hai node không dùng chung epoch, replica từ chối epoch cũ, ghi mà primary cũ nhận khi bị cô lập bị loại bỏ. Đổi lại hệ thống ngừng nhận ghi từ lúc primary sập đến khi promote |
 | 4 | Một mã nguồn cho 4 node trên một máy và 4 máy vật lý; địa chỉ peer lấy từ cấu hình | Triển khai vật lý cần kiểm tra bind IP, firewall, cấu hình peer |
 | 5 | Phục hồi bằng replay operation log, không snapshot | Đủ cho khối lượng dữ liệu đồ án; operation log giữ vĩnh viễn trên mọi node |
 | 6 | Phiên bản chỉ khai báo trong `pom.xml` và Maven Wrapper, thư viện có trong BOM không ghi version riêng; không nâng Spring Boot, gRPC, Protobuf trong dự án; không dùng Lombok; định dạng theo `.editorconfig` | Mọi máy và CI build cùng một bộ phiên bản |
@@ -298,6 +308,7 @@ Quyết định mới được bổ sung vào bảng này qua Pull Request.
 | 15 | Lô S4 gửi nguyên lô trong một lần gọi `ApplyEvents` và áp dụng trong một transaction; giới hạn 100 sự kiện mỗi lần gọi chỉ áp dụng cho tuyến S2, S3 | S4 không bao giờ ở trạng thái nửa lô, retry đơn giản. Một lần gọi có thể vượt 100 sự kiện khi có sự kiện hệ thống xen giữa; sự kiện nhỏ nên không đáng kể |
 | 16 | Replica có `last_applied_seq = 0` tự replay trước khi `READY`; `RESTORING` lưu bền, replay bị gián đoạn tiếp tục từ `last_applied_seq + 1` | Node mất dữ liệu được dựng lại bằng `FetchEvents` trước khi nhận sự kiện mới, thay vì chờ nguồn gửi lại toàn bộ lịch sử. Replay nhiều lần không trùng vì áp dụng theo `seq` trong transaction. Node chờ ở `RESTORING` khi chưa liên lạc được primary |
 | 17 | Gửi theo con trỏ của từng đích trên `operation_log` (log shipping), không dùng outbox từng sự kiện | Cùng mô hình replication log của PostgreSQL (LSN), Kafka (offset) và Raft (`nextIndex`); khớp giao thức ghi từ xa dựa trên bản chính và khôi phục theo nhật trình thao tác. Ít bảng, đổi nguồn chỉ là đặt lại con trỏ, crash không để lại trạng thái treo. Đổi lại: độ trễ S3 và biên lô S4 phải tính từ log thay vì lưu sẵn, cần cột `committed_at` |
+| 18 | Không dùng bỏ phiếu đa số. Thay vào đó: node khởi động lại với `role = PRIMARY` tự hạ khi đã có `PRIMARY` khác (không so epoch); node có cơ sở dữ liệu mới chỉ làm primary khi mọi peer đều ở `seq` 0; replica ở `QUARANTINED` tự replay | Giống failover thủ công của PostgreSQL: primary cũ không tự quay lại, node trống không tự làm primary (Patroni, Kafka cũng chặn). Bỏ phiếu đa số (Raft) cần 3/4 node nên không promote được khi S1 và S2 cùng sập (T14), cần thêm lưu phiếu, heartbeat, lease và đổi `.proto`. Đổi lại: primary cũ chỉ mất mạng vẫn có thể nhận ghi trong lúc bị cô lập (được liệt kê là đã mất); khởi tạo cụm mới phải bật đủ 4 node |
 
 ## 8. Hạn chế đã biết
 

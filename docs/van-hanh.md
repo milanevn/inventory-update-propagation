@@ -46,7 +46,7 @@ Biến môi trường của node (mặc định trong `node-server/src/main/reso
 | Biến | Ý nghĩa | Mặc định |
 |---|---|---|
 | `NODE_ID` | Định danh node | `S1` |
-| `NODE_ROLE` | Vai trò ban đầu, `PRIMARY` hoặc `REPLICA`; chỉ dùng khi cơ sở dữ liệu của node còn mới. Sau đó vai trò lưu trong `node_state` | `PRIMARY` |
+| `NODE_ROLE` | Vai trò ban đầu, `PRIMARY` hoặc `REPLICA`; chỉ dùng khi cơ sở dữ liệu của node còn mới. `PRIMARY` chỉ có hiệu lực khi cụm mới tinh: mọi peer trả lời và đều ở `seq` 0 (thiết kế mục 6 "Khởi động an toàn", **chưa cài**, hiện node nhận ngay vai trò này). Sau đó vai trò lưu trong `node_state` | `PRIMARY` |
 | `GRPC_PORT` | Cổng gRPC, bind trên mọi interface | `9101` |
 | `DB_HOST`, `DB_PORT`, `DB_NAME` | Cơ sở dữ liệu của node | `localhost`, `5541`, `inventory` |
 | `DB_USER`, `DB_PASSWORD` | Tài khoản cơ sở dữ liệu | `inventory` / `local_only_change_me` (chỉ dùng cục bộ) |
