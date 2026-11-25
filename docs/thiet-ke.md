@@ -248,8 +248,10 @@ Phải chọn node mới nhất vì chỉ node đó giữ được nhiều lịc
 Node vừa khởi động chưa nhận ghi hay sự kiện cho tới khi kiểm tra xong: `ExecuteCommand`, `ApplyEvents`, `FetchEvents`, `UpdatePolicy`, `Promote` trả `UNAVAILABLE`; `GetStatus` vẫn trả lời.
 
 1. **Cơ sở dữ liệu mới với `NODE_ROLE = PRIMARY`:** chỉ làm primary khi mọi peer trả lời `GetStatus` và đều có `last_applied_seq = 0` (cụm mới tinh). Chưa liên lạc được đủ peer thì chờ và thử lại. Có peer đã có dữ liệu thì node vào `REPLICA` + `RESTORING` và replay sau khi có primary (mục "Phục hồi dữ liệu").
-2. **Node đã lưu `role = PRIMARY` khởi động lại:** hỏi `GetStatus` các peer. Có peer khác đang là `PRIMARY`, với epoch bất kỳ, thì chuyển sang `REPLICA` và làm theo mục "Primary cũ quay lại"; không so epoch vì node vừa sập có thể giữ epoch cao hơn của một lần promote chưa ai biết. Không peer nào là `PRIMARY` thì tiếp tục làm primary. Chưa liên lạc được peer nào thì chờ và thử lại.
+2. **Node đã lưu `role = PRIMARY` khởi động lại:** hỏi `GetStatus` các peer. Có peer báo epoch lớn hơn epoch của node thì chuyển sang `REPLICA` và làm theo mục "Primary cũ quay lại". Không có thì tiếp tục làm primary; nếu còn node khác lưu `PRIMARY` với epoch nhỏ hơn, node đó tự hạ khi thấy epoch này (kể cả khi hai node khởi động cùng lúc). Chưa liên lạc được peer nào thì chờ và thử lại.
 3. **Replica:** như mục "Kích hoạt và tiếp tục replay".
+
+Integration test chạy một node không có peer tắt bước kiểm tra này bằng cấu hình (mặc định bật); test riêng của bước kiểm tra thì bật lại.
 
 ### Primary cũ quay lại
 
@@ -308,13 +310,14 @@ Quyết định mới được bổ sung vào bảng này qua Pull Request.
 | 15 | Lô S4 gửi nguyên lô trong một lần gọi `ApplyEvents` và áp dụng trong một transaction; giới hạn 100 sự kiện mỗi lần gọi chỉ áp dụng cho tuyến S2, S3 | S4 không bao giờ ở trạng thái nửa lô, retry đơn giản. Một lần gọi có thể vượt 100 sự kiện khi có sự kiện hệ thống xen giữa; sự kiện nhỏ nên không đáng kể |
 | 16 | Replica có `last_applied_seq = 0` tự replay trước khi `READY`; `RESTORING` lưu bền, replay bị gián đoạn tiếp tục từ `last_applied_seq + 1` | Node mất dữ liệu được dựng lại bằng `FetchEvents` trước khi nhận sự kiện mới, thay vì chờ nguồn gửi lại toàn bộ lịch sử. Replay nhiều lần không trùng vì áp dụng theo `seq` trong transaction. Node chờ ở `RESTORING` khi chưa liên lạc được primary |
 | 17 | Gửi theo con trỏ của từng đích trên `operation_log` (log shipping), không dùng outbox từng sự kiện | Cùng mô hình replication log của PostgreSQL (LSN), Kafka (offset) và Raft (`nextIndex`); khớp giao thức ghi từ xa dựa trên bản chính và khôi phục theo nhật trình thao tác. Ít bảng, đổi nguồn chỉ là đặt lại con trỏ, crash không để lại trạng thái treo. Đổi lại: độ trễ S3 và biên lô S4 phải tính từ log thay vì lưu sẵn, cần cột `committed_at` |
-| 18 | Không dùng bỏ phiếu đa số. Thay vào đó: node khởi động lại với `role = PRIMARY` tự hạ khi đã có `PRIMARY` khác (không so epoch); node có cơ sở dữ liệu mới chỉ làm primary khi mọi peer đều ở `seq` 0; replica ở `QUARANTINED` tự replay | Giống failover thủ công của PostgreSQL: primary cũ không tự quay lại, node trống không tự làm primary (Patroni, Kafka cũng chặn). Bỏ phiếu đa số (Raft) cần 3/4 node nên không promote được khi S1 và S2 cùng sập (T14), cần thêm lưu phiếu, heartbeat, lease và đổi `.proto`. Đổi lại: primary cũ chỉ mất mạng vẫn có thể nhận ghi trong lúc bị cô lập (được liệt kê là đã mất); khởi tạo cụm mới phải bật đủ 4 node |
+| 18 | Không dùng bỏ phiếu đa số. Thay vào đó: node khởi động lại với `role = PRIMARY` tự hạ khi có peer báo epoch lớn hơn; node có cơ sở dữ liệu mới chỉ làm primary khi mọi peer đều ở `seq` 0; replica ở `QUARANTINED` tự replay | Giống failover thủ công của PostgreSQL: primary cũ không tự quay lại, node trống không tự làm primary (Patroni, Kafka cũng chặn). So epoch cho kết quả xác định cả khi nhiều node cùng khởi động. Bỏ phiếu đa số (Raft) cần 3/4 node nên không promote được khi S1 và S2 cùng sập (T14), cần thêm lưu phiếu, heartbeat, lease và đổi `.proto`. Đổi lại: primary cũ chỉ mất mạng vẫn có thể nhận ghi trong lúc bị cô lập (được liệt kê là đã mất); khởi tạo cụm mới phải bật đủ 4 node; trường hợp epoch chưa ai biết ở mục 8 |
 
 ## 8. Hạn chế đã biết
 
 | Hạn chế | Ghi chú |
 |---|---|
 | Không có nhất quán mạnh | Replica có thể trả dữ liệu cũ; S4 có thể giữ phần sự kiện chưa đủ lô vô thời hạn |
+| Epoch của một lần promote chưa ai biết | Node được promote rồi sập trước khi node nào nhận được epoch mới của nó, sau đó lại có một lần promote khác với epoch nhỏ hơn: khi quay lại, node này có epoch lớn nhất nên được giữ làm primary. Người vận hành xóa dữ liệu của node đó trước khi chạy lại để nó vào như node mới (mục 6 "Khởi động an toàn" bước 1) |
 | Không cam kết không mất dữ liệu | Ghi chưa kịp nhân bản trước khi primary sập sẽ mất; chúng được liệt kê khi primary cũ quay lại |
 | Ngừng nhận ghi khi primary sập | Kéo dài đến khi người vận hành chạy `promote` |
 | Token truyền plaintext | Chỉ triển khai trong LAN tin cậy; không mở cổng PostgreSQL ra mạng |
