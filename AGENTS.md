@@ -41,8 +41,8 @@ Hệ thống quản lý kho phân tán gồm 4 node S1..S4, replication tự xâ
 ## Quy ước code
 
 - Java 21; dùng `record` cho dữ liệu bất biến. Log bằng SLF4J, không `System.out` trong server; log replication có `seq` và `event_id`.
-- gRPC service mới: Spring bean kế thừa lớp `*ImplBase` sinh từ `.proto`; được đăng ký tự động, không sửa `GrpcServerLifecycle`.
-- Mỗi package tự quản lý repository JDBC của mình; lớp trong `grpc` không chứa SQL hay quy tắc nghiệp vụ.
+- gRPC service mới: Spring bean kế thừa lớp `*ImplBase` sinh từ `.proto`; được đăng ký tự động, không sửa `GrpcServerLifecycle`. Ngoại lệ duy nhất: gắn `ServerInterceptor` kiểm tra token (thiết kế mục 5).
+- Mỗi package tự quản lý repository JDBC của mình; lớp trong `grpc` không chứa SQL hay quy tắc nghiệp vụ. Ngoại lệ: `EventApplier` trong `core` ghi hiệu lực của một sự kiện vào bảng của `inventory`, `policy`, `recovery` (thiết kế mục 3, "Định dạng JSON").
 - Test: unit test `*Test`; integration test `*IT` kế thừa `AbstractNodeIT`. Mỗi test tự dọn dữ liệu, không phụ thuộc thứ tự. Chính sách trễ test bằng đồng hồ mô phỏng, không `sleep`. Test của kịch bản nghiệm thu ghi mã `Txx` trong Javadoc.
 - Nhánh `feature/<module>-<mo-ta-ngan>` tạo từ `main`. Commit theo Conventional Commits, scope là tên module; phần mô tả commit viết bằng tiếng Việt.
 
