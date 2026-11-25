@@ -11,9 +11,11 @@ import java.util.List;
 /**
  * JDBC access to the single {@code node_state} row.
  *
- * <p>The write methods join the caller's transaction ({@link Propagation#MANDATORY}) and fail without
- * one: the caller (inventory on the primary, replication on a replica, recovery during replay) commits
- * the business rows, {@code operation_log} and {@code node_state} together.
+ * <p>The write-path methods ({@link #lockForWrite()}, {@link #issueNextSeq()}, {@link #markApplied(long)})
+ * join the caller's transaction ({@link Propagation#MANDATORY}) and fail without one: the caller
+ * (inventory on the primary, replication on a replica, recovery during replay) commits the business rows,
+ * {@code operation_log} and {@code node_state} together. {@link #initializeRoleIfMissing(String)} is the
+ * exception: a one-off startup step outside the write path, so it runs in its own transaction.
  */
 @Repository
 public class NodeStateRepository {
@@ -49,22 +51,25 @@ public class NodeStateRepository {
     /**
      * Primary only: issues {@code seq = last_issued_seq + 1} and advances {@code last_issued_seq} and
      * {@code last_applied_seq} together. The counter lives in the locked row, not in a database sequence,
-     * so a rollback also undoes the increment and leaves no gap.
+     * so a rollback also undoes the increment and leaves no gap. Call {@link #lockForWrite()} first when
+     * checks (such as request deduplication) must run under the same lock.
      *
-     * @throws IllegalStateException if {@code last_issued_seq != last_applied_seq}, which never holds on a
-     *         primary (a replica must not issue sequence numbers)
+     * @return the new {@code seq} and the epoch read in the same statement; stamp the event with this epoch
+     * @throws IllegalStateException if the node is not {@code PRIMARY} or
+     *         {@code last_issued_seq != last_applied_seq} (never true on a primary)
      */
     @Transactional(propagation = Propagation.MANDATORY)
-    public long issueNextSeq() {
-        List<Long> issued = jdbc.queryForList("""
+    public IssuedSeq issueNextSeq() {
+        List<IssuedSeq> issued = jdbc.query("""
                 UPDATE node_state
                    SET last_issued_seq = last_issued_seq + 1,
                        last_applied_seq = last_applied_seq + 1,
                        updated_at = CURRENT_TIMESTAMP
-                 WHERE singleton = TRUE AND last_issued_seq = last_applied_seq
-                RETURNING last_issued_seq""", Long.class);
+                 WHERE singleton = TRUE AND role = 'PRIMARY' AND last_issued_seq = last_applied_seq
+                RETURNING epoch, last_issued_seq""",
+                (rs, rowNum) -> new IssuedSeq(rs.getLong("epoch"), rs.getLong("last_issued_seq")));
         if (issued.isEmpty()) {
-            throw new IllegalStateException("Cannot issue seq: last_issued_seq != last_applied_seq " + read());
+            throw new IllegalStateException("Cannot issue seq: node is not PRIMARY or counters differ " + read());
         }
         return issued.get(0);
     }
@@ -87,7 +92,8 @@ public class NodeStateRepository {
     }
 
     /**
-     * Stores {@code initialRole} only if the node has no role yet (fresh database).
+     * Stores {@code initialRole} only if the node has no role yet (fresh database). Called once at startup
+     * by {@code NodeRoleInitializer}; opens its own transaction (see the class comment).
      *
      * @return the role stored in {@code node_state} after the call
      */

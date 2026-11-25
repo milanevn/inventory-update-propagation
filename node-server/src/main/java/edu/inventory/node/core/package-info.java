@@ -3,7 +3,7 @@
  * {@code node_state} row (lock, sequence numbers, progress, durable role and status) and the
  * {@code operation_log}.
  *
- * <p>Write methods join the caller's transaction and never open their own, so the caller commits
+ * <p>Write-path methods join the caller's transaction and never open their own, so the caller commits
  * business rows, {@code operation_log}, {@code processed_requests} and {@code node_state} atomically.
  * Deciding when to write (role checks, deduplication, recovery transitions) belongs to the calling
  * package.

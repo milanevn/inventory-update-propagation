@@ -8,11 +8,14 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.IllegalTransactionStateException;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.sql.SQLException;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
@@ -26,6 +29,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.stream.LongStream;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -34,6 +38,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 class NodeCoreIT extends AbstractNodeIT {
 
     private static final Instant COMMITTED_AT = Instant.parse("2026-11-25T10:00:00Z");
+    /** PostgreSQL SQLSTATE for FOR UPDATE NOWAIT on a row locked by another transaction. */
+    private static final String LOCK_NOT_AVAILABLE = "55P03";
 
     @Autowired JdbcTemplate jdbc;
     @Autowired NodeStateRepository nodeState;
@@ -46,7 +52,42 @@ class NodeCoreIT extends AbstractNodeIT {
         tx = new TransactionTemplate(transactionManager);
         jdbc.update("DELETE FROM processed_requests");
         jdbc.update("DELETE FROM operation_log");
-        jdbc.update("UPDATE node_state SET last_issued_seq = 0, last_applied_seq = 0 WHERE singleton = TRUE");
+        jdbc.update("UPDATE node_state SET role = 'PRIMARY', epoch = 1, last_issued_seq = 0, last_applied_seq = 0 "
+                + "WHERE singleton = TRUE");
+    }
+
+    @Test void lockForWriteHoldsTheRowUntilTheTransactionEnds() {
+        TransactionTemplate other = new TransactionTemplate(transactionManager);
+        other.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        Runnable tryLockFromOtherConnection = () -> other.executeWithoutResult(status ->
+                jdbc.queryForObject("SELECT last_issued_seq FROM node_state WHERE singleton = TRUE FOR UPDATE NOWAIT",
+                        Long.class));
+
+        tx.executeWithoutResult(status -> {
+            nodeState.lockForWrite();
+            // Locked before any seq is issued, so checks such as request deduplication run under the lock.
+            DataAccessException blocked = assertThrows(DataAccessException.class, tryLockFromOtherConnection::run);
+            assertEquals(LOCK_NOT_AVAILABLE, ((SQLException) blocked.getMostSpecificCause()).getSQLState());
+        });
+
+        assertDoesNotThrow(tryLockFromOtherConnection::run);
+    }
+
+    @Test void replicaCannotIssueSeqEvenWithEqualCounters() {
+        jdbc.update("UPDATE node_state SET role = 'REPLICA' WHERE singleton = TRUE");
+
+        assertThrows(IllegalStateException.class, () -> tx.execute(status -> nodeState.issueNextSeq()));
+        NodeState state = nodeState.read();
+        assertEquals(0, state.lastIssuedSeq());
+        assertEquals(0, state.lastAppliedSeq());
+    }
+
+    @Test void issuedSeqCarriesTheEpochReadInTheSameStatement() {
+        jdbc.update("UPDATE node_state SET epoch = 3 WHERE singleton = TRUE");
+
+        IssuedSeq issued = tx.execute(status -> nodeState.issueNextSeq());
+
+        assertEquals(new IssuedSeq(3, 1), issued);
     }
 
     @Test void primaryIssuesContiguousSeqAndAdvancesBothCounters() {
@@ -110,7 +151,7 @@ class NodeCoreIT extends AbstractNodeIT {
     @Test void appendStoresCommittedAtPayloadAndNullRequestIdForEpochStart() {
         tx.executeWithoutResult(status -> {
             nodeState.lockForWrite();
-            operationLog.append(event(nodeState.issueNextSeq(), EventType.EPOCH_START, null), COMMITTED_AT);
+            operationLog.append(event(nodeState.issueNextSeq().seq(), EventType.EPOCH_START, null), COMMITTED_AT);
         });
 
         Map<String, Object> row = jdbc.queryForMap(
@@ -152,11 +193,11 @@ class NodeCoreIT extends AbstractNodeIT {
 
     /** The primary write order from docs/thiet-ke.md section 4: lock, issue seq, append, commit. */
     private long writeOnPrimary() {
-        NodeState locked = nodeState.lockForWrite();
-        long seq = nodeState.issueNextSeq();
-        operationLog.append(new EventEnvelope(UUID.randomUUID(), locked.epoch(), seq, EventType.STOCK_IN,
+        nodeState.lockForWrite();
+        IssuedSeq issued = nodeState.issueNextSeq();
+        operationLog.append(new EventEnvelope(UUID.randomUUID(), issued.epoch(), issued.seq(), EventType.STOCK_IN,
                 UUID.randomUUID(), 1, "{\"note\": \"test\"}"), COMMITTED_AT);
-        return seq;
+        return issued.seq();
     }
 
     private static EventEnvelope event(long seq, EventType type, UUID requestId) {
