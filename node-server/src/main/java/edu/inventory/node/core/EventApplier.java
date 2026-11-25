@@ -25,6 +25,12 @@ import java.time.Instant;
  * {@link NodeStateRepository#issueNextSeq()} before, a replica calls
  * {@link NodeStateRepository#markApplied(long)} after. It does not decide whether an event may be
  * applied either (role, epoch, seq order, duplicates); callers check that first.
+ *
+ * <p>Only pass events already checked against the data: on the primary, reject a command (product
+ * missing or already present, not enough stock) under the lock before issuing a seq, as in
+ * docs/thiet-ke.md section 4. An exception from {@link #apply} marks the caller's transaction
+ * rollback-only, so it cannot be used to detect a rejected command and then store its result in the
+ * same transaction.
  */
 @Component
 public class EventApplier {

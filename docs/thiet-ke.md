@@ -123,9 +123,9 @@ Một lệnh ghi đi qua hệ thống như sau:
 1. Từ chối nếu node không phải primary của epoch hiện hành (`FAILED_PRECONDITION`).
 2. Khóa `node_state` (`SELECT ... FOR UPDATE`) để tuần tự hóa thứ tự ghi.
 3. Kiểm tra `request_id` trong cùng khóa: đã xử lý với cùng nội dung thì trả lại kết quả cũ; khác nội dung thì `INVALID_ARGUMENT`.
-4. Áp dụng nghiệp vụ. Xuất kho dùng `UPDATE` có điều kiện `quantity >= số lượng xuất`. Lệnh bị từ chối (sản phẩm đã có, chưa có, không đủ tồn kho) chỉ lưu kết quả vào `processed_requests`, không tạo sự kiện.
+4. Kiểm tra lệnh với dữ liệu hiện có, trong cùng khóa (sản phẩm đã có, chưa có, đủ tồn kho). Lệnh bị từ chối chỉ lưu kết quả vào `processed_requests` rồi commit: không cấp `seq`, không tạo sự kiện.
 5. Cấp `seq = last_issued_seq + 1` trong cùng khóa, nên rollback không tạo khoảng trống; `last_issued_seq` và `last_applied_seq` cùng tăng.
-6. Ghi `operation_log` (kèm `committed_at`), `processed_requests`; cập nhật `node_state`; commit. Không ghi gì riêng cho từng đích. Sau commit, đánh thức worker gửi.
+6. Áp dụng sự kiện bằng `EventApplier` (mục 3): dữ liệu nghiệp vụ (xuất kho vẫn dùng `UPDATE` có điều kiện `quantity >= số lượng xuất` làm lớp chặn cuối), `operation_log` (kèm `committed_at`), `processed_requests`; commit. Không ghi gì riêng cho từng đích. Sau commit, đánh thức worker gửi.
 
 ### Ba chính sách lan truyền
 
