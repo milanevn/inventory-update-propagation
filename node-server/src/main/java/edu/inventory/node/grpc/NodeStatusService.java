@@ -35,13 +35,15 @@ public class NodeStatusService extends NodeServiceGrpc.NodeServiceImplBase {
             responseObserver.onError(Status.UNAVAILABLE.withDescription("node database is unavailable").asRuntimeException());
             return;
         }
+        String role = state.role() == null ? "" : state.role();
+        String status = state.status() == null ? "" : state.status();
         responseObserver.onNext(NodeStatusReply.newBuilder()
                 .setNodeId(properties.id())
-                .setRole(state.role())
+                .setRole(role)
                 .setEpoch(state.epoch())
                 .setLastIssuedSeq(state.lastIssuedSeq())
                 .setLastAppliedSeq(state.lastAppliedSeq())
-                .setStatus(state.status())
+                .setStatus(status)
                 .build());
         responseObserver.onCompleted();
     }

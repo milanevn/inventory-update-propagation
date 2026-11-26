@@ -93,6 +93,16 @@ class NodeStatusIT extends AbstractNodeIT {
         assertEquals("QUARANTINED", reply.getStatus());
     }
 
+    @Test void getStatusAnswersWhenRoleIsNull() throws InterruptedException {
+        jdbc.update("UPDATE node_state SET role = NULL WHERE singleton = TRUE");
+
+        NodeStatusReply reply = getStatus();
+
+        assertEquals("S1", reply.getNodeId());
+        assertEquals("", reply.getRole());
+        assertEquals("READY", reply.getStatus());
+    }
+
     private NodeStatusReply getStatus() throws InterruptedException {
         ManagedChannel channel = ManagedChannelBuilder.forAddress("localhost", GRPC_PORT).usePlaintext().build();
         try {
