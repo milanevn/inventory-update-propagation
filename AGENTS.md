@@ -44,7 +44,7 @@ Hệ thống quản lý kho phân tán gồm 4 node S1..S4, replication tự xâ
 - gRPC service mới: Spring bean kế thừa lớp `*ImplBase` sinh từ `.proto`; được đăng ký tự động, không sửa `GrpcServerLifecycle`. Ngoại lệ duy nhất: gắn `ServerInterceptor` kiểm tra token (thiết kế mục 5).
 - Mỗi package tự quản lý repository JDBC của mình; lớp trong `grpc` không chứa SQL hay quy tắc nghiệp vụ. Ngoại lệ: `EventApplier` trong `core` ghi hiệu lực của một sự kiện vào bảng của `inventory`, `policy`, `recovery` (thiết kế mục 3, "Định dạng JSON").
 - Test: unit test `*Test`; integration test `*IT` kế thừa `AbstractNodeIT`. Mỗi test tự dọn dữ liệu, không phụ thuộc thứ tự. Chính sách trễ test bằng đồng hồ mô phỏng, không `sleep`. Test của kịch bản nghiệm thu ghi mã `Txx` trong Javadoc.
-- Nhánh `feature/<module>-<mo-ta-ngan>` tạo từ `main`. Commit theo Conventional Commits, scope là tên module; phần mô tả commit viết bằng tiếng Việt.
+- Nhánh tạo từ `main`, tên theo bảng trong `CONTRIBUTING.md` mục 2: `feature/<module>-<mo-ta>`, `contract/<mo-ta>`, `fix/<module>-<mo-ta>`, `test/<mo-ta>`, `ops/<mo-ta>`, `docs/<mo-ta>`. Commit theo Conventional Commits, scope là tên module; phần mô tả commit viết bằng tiếng Việt.
 
 ## Lệnh thường dùng
 
