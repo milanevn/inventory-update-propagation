@@ -9,12 +9,26 @@
 
 ## 2. Nhánh và Pull Request
 
-| Nhánh | Vai trò |
-|---|---|
-| `main` | Nhánh duy nhất lâu dài: luôn build, test và chạy được cụm 4 node. Chỉ nhận Pull Request từ các nhánh `feature/*`. |
-| `feature/<module>-<mo-ta-ngan>` | Mỗi việc một nhánh, tạo từ `main`, xóa sau khi merge. Ví dụ: `feature/contracts-v2`, `feature/replication-apply-events`, `feature/policy-delay-s3`. |
+`main` là nhánh duy nhất lâu dài: luôn build, test và chạy được cụm 4 node. Mỗi việc làm trên một nhánh ngắn hạn, tạo từ `main`, xóa sau khi merge. Tên nhánh theo một trong các loại sau; không tạo loại nhánh khác.
 
-`<module>` là tên module hoặc package trong [thiết kế](docs/thiet-ke.md#3-kiến-trúc) (`core`, `inventory`, `replication`, `policy`, `recovery`, `contracts`, `cli`...), hoặc `docs`, `scripts`. Sửa lỗi cũng dùng nhánh `feature/*`. Không tạo loại nhánh khác.
+| Loại | Mẫu tên | Ví dụ |
+|---|---|---|
+| Tính năng | `feature/<module>-<mo-ta>` | `feature/replication-apply-events` |
+| Hợp đồng và schema | `contract/<mo-ta>` | `contract/schema-v3` |
+| Sửa lỗi | `fix/<module>-<mo-ta>` | `fix/policy-batch-flush` |
+| Kiểm thử | `test/<mo-ta>` | `test/e2e-faults` |
+| Vận hành | `ops/<mo-ta>` | `ops/ready-check` |
+| Tài liệu | `docs/<mo-ta>` | `docs/branch-naming` |
+
+- `<module>` là module hoặc package trong [thiết kế](docs/thiet-ke.md#3-kiến-trúc): `core`, `inventory`, `replication`, `policy`, `recovery`, `cli`, `node-server`. `<mo-ta>` gồm 2–4 từ tiếng Anh, chỉ chữ thường không dấu, số và `-` (Windows không phân biệt hoa thường trong tên nhánh).
+- Chọn loại theo thứ tự, dừng ở dòng đầu tiên khớp:
+  1. Sửa `inventory.proto` hoặc thêm migration → `contract/`. Nên tách thành Pull Request nhỏ, merge trước phần tính năng dùng nó.
+  2. Sửa lỗi của code đã merge → `fix/`.
+  3. Chỉ sửa khung test, test nhiều node, script chèn lỗi hoặc E2E → `test/`.
+  4. Chỉ sửa script, build hoặc cách chạy cụm → `ops/`.
+  5. Chỉ sửa tài liệu → `docs/`.
+  6. Còn lại → `feature/`.
+- Test của chính tính năng và phần cập nhật `docs/thiet-ke.md` đi cùng nhánh `feature/` hoặc `fix/` của thay đổi đó, không tách nhánh riêng.
 
 ```powershell
 git switch main; git pull
