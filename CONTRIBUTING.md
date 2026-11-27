@@ -38,7 +38,7 @@ git switch -c feature/replication-apply-events
 - Không push trực tiếp lên `main`; mọi thay đổi đi qua Pull Request.
 - Trước khi mở Pull Request: cập nhật `main` mới nhất vào nhánh của mình (`git pull origin main`) và chạy `mvnw verify`.
 - Pull Request nhỏ, một mục đích, ghi rõ mã công việc và kịch bản nghiệm thu liên quan. Nhánh sống ngắn; việc lớn thì chia thành nhiều Pull Request.
-- Merge khi có ít nhất một approve và CI xanh. Thay đổi giao thức, schema hoặc quyền ghi của primary cần maintainer duyệt.
+- Chỉ maintainer merge Pull Request; thành viên khác review và approve nhưng không merge được (ruleset của `main` chặn). Maintainer chỉ merge khi có ít nhất một approve của người khác và CI xanh, dù GitHub cho maintainer bỏ qua hai điều kiện này. Thay đổi giao thức, schema hoặc quyền ghi của primary cần maintainer duyệt.
 - Merge bằng *Squash and merge*: mỗi Pull Request thành một commit trên `main`, tiêu đề Pull Request là commit message.
 - Khi các kịch bản nghiệm thu của một mốc đều đạt, maintainer gắn tag `v0.<n>.0` trên `main`; tag là mốc có thể quay lại.
 - Commit message và tiêu đề Pull Request theo [Conventional Commits](https://www.conventionalcommits.org/): giữ type và scope theo quy ước tiếng Anh, scope là tên module; phần mô tả sau dấu `:` viết bằng tiếng Việt. Ví dụ: `feat(replication): áp dụng lô sự kiện liên tục`, `fix(inventory): từ chối xuất kho vượt tồn`.
