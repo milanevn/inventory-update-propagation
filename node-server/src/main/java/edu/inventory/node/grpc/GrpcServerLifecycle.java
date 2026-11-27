@@ -1,6 +1,7 @@
 package edu.inventory.node.grpc;
 
 import edu.inventory.node.config.NodeProperties;
+import edu.inventory.node.core.NodeStateRepository;
 import io.grpc.BindableService;
 import io.grpc.Server;
 import io.grpc.ServerServiceDefinition;
@@ -27,12 +28,14 @@ public class GrpcServerLifecycle implements SmartLifecycle {
 
     private final List<BindableService> services;
     private final NodeProperties properties;
+    private final NodeStateRepository nodeState;
     private volatile boolean running;
     private Server server;
 
-    public GrpcServerLifecycle(List<BindableService> services, NodeProperties properties) {
+    public GrpcServerLifecycle(List<BindableService> services, NodeProperties properties, NodeStateRepository nodeState) {
         this.services = List.copyOf(services);
         this.properties = properties;
+        this.nodeState = nodeState;
     }
 
     @Override public synchronized void start() {
@@ -57,7 +60,17 @@ public class GrpcServerLifecycle implements SmartLifecycle {
         running = true;
         startKeepAliveThread(server);
         log.info("{} [{}] gRPC listening on {} with services {}",
-                properties.id(), properties.role(), properties.grpcPort(), names.stream().sorted().toList());
+                properties.id(), readDurableRole(), properties.grpcPort(), names.stream().sorted().toList());
+    }
+
+    private String readDurableRole() {
+        try {
+            String role = nodeState.read().role();
+            return role == null || role.isBlank() ? "UNASSIGNED" : role;
+        } catch (Exception e) {
+            log.warn("{} could not read durable role from node_state ({})", properties.id(), e.getMessage());
+            return "UNKNOWN";
+        }
     }
 
     /**

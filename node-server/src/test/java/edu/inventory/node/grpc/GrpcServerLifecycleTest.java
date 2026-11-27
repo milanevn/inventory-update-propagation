@@ -8,11 +8,16 @@ import edu.inventory.contracts.v1.NodeStatusReply;
 import edu.inventory.contracts.v1.NodeStatusRequest;
 import edu.inventory.contracts.v1.ReplicationServiceGrpc;
 import edu.inventory.node.config.NodeProperties;
+import edu.inventory.node.core.NodeState;
+import edu.inventory.node.core.NodeStateRepository;
 import io.grpc.BindableService;
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
 import io.grpc.stub.StreamObserver;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 
 import java.io.IOException;
 import java.net.ServerSocket;
@@ -21,13 +26,17 @@ import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
+@ExtendWith(OutputCaptureExtension.class)
 class GrpcServerLifecycleTest {
 
     /** Regression: the node JVM exited right after startup because all gRPC threads were daemon threads. */
     @Test void keepsANonDaemonThreadAliveWhileTheServerRunsAndReleasesItOnStop() throws Exception {
         NodeProperties props = new NodeProperties("S1", "PRIMARY", freePort());
-        GrpcServerLifecycle lifecycle = new GrpcServerLifecycle(List.of(new FakeNodeService()), props);
+        GrpcServerLifecycle lifecycle = new GrpcServerLifecycle(
+                List.of(new FakeNodeService()), props, nodeState("PRIMARY"));
 
         lifecycle.start();
         try {
@@ -50,7 +59,8 @@ class GrpcServerLifecycleTest {
         int port = freePort();
         GrpcServerLifecycle lifecycle = new GrpcServerLifecycle(
                 List.of(new FakeNodeService(), new FakeReplicationService()),
-                new NodeProperties("S2", "REPLICA", port));
+                new NodeProperties("S2", "REPLICA", port),
+                nodeState("REPLICA"));
         lifecycle.start();
         ManagedChannel channel = ManagedChannelBuilder.forAddress("localhost", port).usePlaintext().build();
         try {
@@ -65,13 +75,53 @@ class GrpcServerLifecycleTest {
         }
     }
 
+    @Test void logsDurableRoleFromNodeStateInsteadOfConfiguration(CapturedOutput output) throws Exception {
+        int port = freePort();
+        GrpcServerLifecycle lifecycle = new GrpcServerLifecycle(
+                List.of(new FakeNodeService()),
+                new NodeProperties("S1", "PRIMARY", port),
+                nodeState("REPLICA"));
+
+        lifecycle.start();
+        try {
+            assertTrue(output.getOut().contains("S1 [REPLICA] gRPC listening on " + port), output::getOut);
+        } finally {
+            lifecycle.stop();
+        }
+    }
+
+    @Test void startsEvenWhenNodeStateRoleIsNullOrUnreadable(CapturedOutput output) throws Exception {
+        NodeStateRepository unreadable = mock(NodeStateRepository.class);
+        when(unreadable.read()).thenThrow(new IllegalStateException("db down"));
+        int port = freePort();
+        GrpcServerLifecycle lifecycle = new GrpcServerLifecycle(
+                List.of(new FakeNodeService()),
+                new NodeProperties("S1", "PRIMARY", port),
+                unreadable);
+
+        lifecycle.start();
+        try {
+            assertTrue(lifecycle.isRunning());
+            assertTrue(output.getOut().contains("S1 [UNKNOWN] gRPC listening on " + port), output::getOut);
+        } finally {
+            lifecycle.stop();
+        }
+    }
+
     @Test void rejectsTwoBeansForTheSameService() throws Exception {
         GrpcServerLifecycle lifecycle = new GrpcServerLifecycle(
                 List.<BindableService>of(new FakeNodeService(), new FakeNodeService()),
-                new NodeProperties("S1", "PRIMARY", freePort()));
+                new NodeProperties("S1", "PRIMARY", freePort()),
+                nodeState("PRIMARY"));
         IllegalStateException error = assertThrows(IllegalStateException.class, lifecycle::start);
         assertTrue(error.getMessage().contains("inventory.v1.NodeService"), error.getMessage());
         assertFalse(lifecycle.isRunning());
+    }
+
+    private static NodeStateRepository nodeState(String role) {
+        NodeStateRepository repo = mock(NodeStateRepository.class);
+        when(repo.read()).thenReturn(new NodeState(role, 1, 0, 0, "READY"));
+        return repo;
     }
 
     private static final class FakeNodeService extends NodeServiceGrpc.NodeServiceImplBase {
